@@ -9,10 +9,10 @@ import br.com.watchusee.watchusee.user.repository.UserRepository;
 import br.com.watchusee.watchusee.watchlist.domain.Watchlist;
 import br.com.watchusee.watchusee.watchlist.domain.WatchlistStatus;
 import br.com.watchusee.watchusee.watchlist.repository.WatchlistRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.List;
 
 @Service
 public class WatchlistService {
@@ -35,9 +35,10 @@ public class WatchlistService {
     }
 
     @Transactional
-    public void addToWatch(
+    public Watchlist updateStatus(
             Long userId,
-            Long movieId
+            Long movieId,
+            WatchlistStatus status
     ) {
 
         User user = findUser(userId);
@@ -46,172 +47,47 @@ public class WatchlistService {
 
         Watchlist watchlist =
                 watchlistRepository
-                        .findByUserIdAndMovieId(userId, movieId)
-                        .orElse(null);
-
-        if (watchlist != null) {
-
-            if (watchlist.getStatus() == WatchlistStatus.TO_WATCH) {
-                return;
-            }
-
-            watchlistRepository.deleteByUserIdAndMovieId(
-                    userId,
-                    movieId
-            );
-        }
-
-        Watchlist newWatchlist = new Watchlist(
-                user,
-                movie,
-                WatchlistStatus.TO_WATCH
-        );
-
-        watchlistRepository.save(newWatchlist);
-    }
-
-    @Transactional
-    public void removeFromWatch(
-            Long userId,
-            Long movieId
-    ) {
-
-        findUser(userId);
-
-        watchlistRepository
-                .findByUserIdAndMovieId(userId, movieId)
-                .filter(watchlist ->
-                        watchlist.getStatus() == WatchlistStatus.TO_WATCH
-                )
-                .ifPresent(watchlist ->
-                        watchlistRepository.deleteByUserIdAndMovieId(
+                        .findByUserIdAndMovieId(
                                 userId,
                                 movieId
                         )
-                );
-    }
-
-    @Transactional
-    public void markAsWatched(
-            Long userId,
-            Long movieId
-    ) {
-
-        User user = findUser(userId);
-
-        Movie movie = findOrCreateMovie(movieId);
-
-        Watchlist watchlist =
-                watchlistRepository
-                        .findByUserIdAndMovieId(userId, movieId)
                         .orElse(null);
 
-        if (watchlist != null) {
+        if (watchlist == null) {
 
-            if (watchlist.getStatus() == WatchlistStatus.WATCHED) {
-                return;
-            }
+            Watchlist newWatchlist =
+                    new Watchlist(
+                            user,
+                            movie,
+                            status
+                    );
 
-            watchlistRepository.deleteByUserIdAndMovieId(
-                    userId,
-                    movieId
+            return watchlistRepository.save(
+                    newWatchlist
             );
         }
 
-        Watchlist newWatchlist = new Watchlist(
-                user,
-                movie,
-                WatchlistStatus.WATCHED
-        );
+        watchlist.updateStatus(status);
 
-        watchlistRepository.save(newWatchlist);
+        return watchlistRepository.save(watchlist);
     }
 
     @Transactional
-    public void removeFromWatched(
+    public void remove(
             Long userId,
             Long movieId
     ) {
 
         findUser(userId);
 
-        watchlistRepository
-                .findByUserIdAndMovieId(userId, movieId)
-                .filter(watchlist ->
-                        watchlist.getStatus() == WatchlistStatus.WATCHED
-                )
-                .ifPresent(watchlist ->
-                        watchlistRepository.deleteByUserIdAndMovieId(
-                                userId,
-                                movieId
-                        )
-                );
+        watchlistRepository.deleteByUserIdAndMovieId(
+                userId,
+                movieId
+        );
     }
 
     @Transactional(readOnly = true)
-    public boolean isToWatch(
-            Long userId,
-            Long movieId
-    ) {
-
-        findUser(userId);
-
-        return watchlistRepository
-                .existsByUserIdAndMovieIdAndStatus(
-                        userId,
-                        movieId,
-                        WatchlistStatus.TO_WATCH
-                );
-    }
-
-    @Transactional(readOnly = true)
-    public boolean isWatched(
-            Long userId,
-            Long movieId
-    ) {
-
-        findUser(userId);
-
-        return watchlistRepository
-                .existsByUserIdAndMovieIdAndStatus(
-                        userId,
-                        movieId,
-                        WatchlistStatus.WATCHED
-                );
-    }
-
-    @Transactional(readOnly = true)
-    public List<Movie> getToWatch(Long userId) {
-
-        findUser(userId);
-
-        return watchlistRepository
-                .findAllByUserIdAndStatus(
-                        userId,
-                        WatchlistStatus.TO_WATCH
-                )
-                .stream()
-                .map(Watchlist::getMovie)
-                .toList();
-    }
-
-    @Transactional(readOnly = true)
-    public List<Movie> getWatched(Long userId) {
-
-        findUser(userId);
-
-        return watchlistRepository
-                .findAllByUserIdAndStatus(
-                        userId,
-                        WatchlistStatus.WATCHED
-                )
-                .stream()
-                .map(Watchlist::getMovie)
-                .toList();
-    }
-
-    @Transactional(readOnly = true)
-    public WatchlistStatus getStatus(
+    public Watchlist get(
             Long userId,
             Long movieId
     ) {
@@ -223,8 +99,36 @@ public class WatchlistService {
                         userId,
                         movieId
                 )
-                .map(Watchlist::getStatus)
-                .orElse(null);
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Filme não encontrado na watchlist."
+                        )
+                );
+    }
+
+    @Transactional(readOnly = true)
+    public Page<Watchlist> findAll(
+            Long userId,
+            WatchlistStatus status,
+            Pageable pageable
+    ) {
+
+        findUser(userId);
+
+        if (status == null) {
+
+            return watchlistRepository.findAllByUserId(
+                    userId,
+                    pageable
+            );
+        }
+
+        return watchlistRepository
+                .findAllByUserIdAndStatus(
+                        userId,
+                        status,
+                        pageable
+                );
     }
 
     private User findUser(Long userId) {
@@ -256,10 +160,10 @@ public class WatchlistService {
                 .findById(movieId)
                 .orElseGet(() -> {
 
-                    Movie movie = movieService.getMovie(movieId);
+                    Movie movie =
+                            movieService.getMovie(movieId);
 
                     return movieRepository.save(movie);
                 });
     }
-
 }

@@ -85,6 +85,7 @@ public class Watchlist {
             Movie movie,
             WatchlistStatus status
     ) {
+
         if (user == null) {
             throw new IllegalArgumentException(
                     "O usuário não pode ser nulo."
@@ -107,6 +108,17 @@ public class Watchlist {
         this.movie = movie;
         this.status = status;
         this.createdAt = Instant.now();
+    }
+
+    public void updateStatus(WatchlistStatus status) {
+
+        if (status == null) {
+            throw new IllegalArgumentException(
+                    "O status da watchlist não pode ser nulo."
+            );
+        }
+
+        this.status = status;
     }
 
     public Long getId() {

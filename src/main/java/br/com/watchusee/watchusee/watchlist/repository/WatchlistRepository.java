@@ -2,10 +2,11 @@ package br.com.watchusee.watchusee.watchlist.repository;
 
 import br.com.watchusee.watchusee.watchlist.domain.Watchlist;
 import br.com.watchusee.watchusee.watchlist.domain.WatchlistStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-import java.util.List;
 import java.util.Optional;
 
 public interface WatchlistRepository
@@ -18,9 +19,16 @@ public interface WatchlistRepository
     );
 
     @EntityGraph(attributePaths = "movie")
-    List<Watchlist> findAllByUserIdAndStatus(
+    Page<Watchlist> findAllByUserId(
             Long userId,
-            WatchlistStatus status
+            Pageable pageable
+    );
+
+    @EntityGraph(attributePaths = "movie")
+    Page<Watchlist> findAllByUserIdAndStatus(
+            Long userId,
+            WatchlistStatus status,
+            Pageable pageable
     );
 
     boolean existsByUserIdAndMovieIdAndStatus(

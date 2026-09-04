@@ -3,17 +3,30 @@ package br.com.watchusee.watchusee.watchlist.api;
 import br.com.watchusee.watchusee.movie.api.dto.MovieResponse;
 import br.com.watchusee.watchusee.movie.mapper.MovieResponseMapper;
 import br.com.watchusee.watchusee.shared.security.AuthenticatedUser;
+import br.com.watchusee.watchusee.watchlist.api.dto.PageResponse;
+import br.com.watchusee.watchusee.watchlist.api.dto.UpdateWatchlistRequest;
+import br.com.watchusee.watchusee.watchlist.api.dto.WatchlistResponse;
+import br.com.watchusee.watchusee.watchlist.domain.Watchlist;
+import br.com.watchusee.watchusee.watchlist.domain.WatchlistStatus;
 import br.com.watchusee.watchusee.watchlist.service.WatchlistService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Positive;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/watchlist")
+@Validated
 @Tag(
         name = "Watchlist",
         description = "Gerenciamento dos filmes do usuário autenticado."
@@ -34,158 +47,150 @@ public class WatchlistController {
         this.authenticatedUser = authenticatedUser;
     }
 
-    @PostMapping("/to-watch/{movieId}")
+    @GetMapping
     @Operation(
-            summary = "Adicionar filme à lista Assistir"
+            summary = "Listar filmes da watchlist"
     )
-    public ResponseEntity<Void> addToWatch(
-            @PathVariable @Positive Long movieId
+    public ResponseEntity<PageResponse<WatchlistResponse>> findAll(
+
+            @Parameter(
+                    description = "Filtra pelo status da watchlist.",
+                    example = "TO_WATCH"
+            )
+            @RequestParam(required = false)
+            WatchlistStatus status,
+
+            @RequestParam(defaultValue = "0")
+            @Min(0)
+            int page,
+
+            @RequestParam(defaultValue = "20")
+            @Min(1)
+            @Max(100)
+            int size
+
     ) {
 
         Long userId =
                 authenticatedUser.getId();
 
-        watchlistService.addToWatch(
-                userId,
-                movieId
-        );
+        Pageable pageable =
+                PageRequest.of(
+                        page,
+                        size,
+                        Sort.by(
+                                Sort.Direction.DESC,
+                                "createdAt"
+                        )
+                );
 
-        return ResponseEntity
-                .noContent()
-                .build();
-    }
-
-    @DeleteMapping("/to-watch/{movieId}")
-    @Operation(
-            summary = "Remover filme da lista Assistir"
-    )
-    public ResponseEntity<Void> removeFromWatch(
-            @PathVariable @Positive Long movieId
-    ) {
-
-        Long userId =
-                authenticatedUser.getId();
-
-        watchlistService.removeFromWatch(
-                userId,
-                movieId
-        );
-
-        return ResponseEntity
-                .noContent()
-                .build();
-    }
-
-    @PostMapping("/watched/{movieId}")
-    @Operation(
-            summary = "Marcar filme como Assistido"
-    )
-    public ResponseEntity<Void> markAsWatched(
-            @PathVariable @Positive Long movieId
-    ) {
-
-        Long userId =
-                authenticatedUser.getId();
-
-        watchlistService.markAsWatched(
-                userId,
-                movieId
-        );
-
-        return ResponseEntity
-                .noContent()
-                .build();
-    }
-
-    @DeleteMapping("/watched/{movieId}")
-    @Operation(
-            summary = "Remover filme da lista Assistidos"
-    )
-    public ResponseEntity<Void> removeFromWatched(
-            @PathVariable @Positive Long movieId
-    ) {
-
-        Long userId =
-                authenticatedUser.getId();
-
-        watchlistService.removeFromWatched(
-                userId,
-                movieId
-        );
-
-        return ResponseEntity
-                .noContent()
-                .build();
-    }
-
-    @GetMapping("/to-watch")
-    @Operation(
-            summary = "Lista de filmes para assistir"
-    )
-    public ResponseEntity<List<MovieResponse>> getToWatch() {
-
-        Long userId =
-                authenticatedUser.getId();
-
-        List<MovieResponse> response =
+        Page<WatchlistResponse> result =
                 watchlistService
-                        .getToWatch(userId)
-                        .stream()
-                        .map(movieResponseMapper::toResponse)
-                        .toList();
+                        .findAll(
+                                userId,
+                                status,
+                                pageable
+                        )
+                        .map(this::toResponse);
+
+        PageResponse<WatchlistResponse> response =
+                new PageResponse<>(
+                        result.getContent(),
+                        result.getNumber(),
+                        result.getSize(),
+                        result.getTotalElements(),
+                        result.getTotalPages(),
+                        result.isFirst(),
+                        result.isLast()
+                );
 
         return ResponseEntity.ok(response);
     }
 
-    @GetMapping("/watched")
+    @GetMapping("/{movieId}")
     @Operation(
-            summary = "Lista de filmes assistidos"
+            summary = "Consultar filme na watchlist"
     )
-    public ResponseEntity<List<MovieResponse>> getWatched() {
-
-        Long userId =
-                authenticatedUser.getId();
-
-        List<MovieResponse> response =
-                watchlistService
-                        .getWatched(userId)
-                        .stream()
-                        .map(movieResponseMapper::toResponse)
-                        .toList();
-
-        return ResponseEntity.ok(response);
-    }
-
-    @GetMapping("/{movieId}/status")
-    @Operation(
-            summary = "Consulta o status do filme na watchlist"
-    )
-    public ResponseEntity<WatchlistStatusResponse> getStatus(
+    public ResponseEntity<WatchlistResponse> get(
             @PathVariable @Positive Long movieId
     ) {
 
         Long userId =
                 authenticatedUser.getId();
+
+        Watchlist watchlist =
+                watchlistService.get(
+                        userId,
+                        movieId
+                );
 
         return ResponseEntity.ok(
-                new WatchlistStatusResponse(
-                        movieId,
-                        watchlistService.isToWatch(
-                                userId,
-                                movieId
-                        ),
-                        watchlistService.isWatched(
-                                userId,
-                                movieId
-                        )
-                )
+                toResponse(watchlist)
         );
     }
 
-    public record WatchlistStatusResponse(
-            Long movieId,
-            boolean toWatch,
-            boolean watched
+    @PutMapping("/{movieId}")
+    @Operation(
+            summary = "Adicionar ou atualizar o status de um filme"
+    )
+    public ResponseEntity<WatchlistResponse> updateStatus(
+
+            @PathVariable @Positive Long movieId,
+
+            @RequestBody @Valid
+            UpdateWatchlistRequest request
+
     ) {
+
+        Long userId =
+                authenticatedUser.getId();
+
+        Watchlist watchlist =
+                watchlistService.updateStatus(
+                        userId,
+                        movieId,
+                        request.status()
+                );
+
+        return ResponseEntity.ok(
+                toResponse(watchlist)
+        );
+    }
+
+    @DeleteMapping("/{movieId}")
+    @Operation(
+            summary = "Remover filme da watchlist"
+    )
+    public ResponseEntity<Void> remove(
+            @PathVariable @Positive Long movieId
+    ) {
+
+        Long userId =
+                authenticatedUser.getId();
+
+        watchlistService.remove(
+                userId,
+                movieId
+        );
+
+        return ResponseEntity
+                .noContent()
+                .build();
+    }
+
+    private WatchlistResponse toResponse(
+            Watchlist watchlist
+    ) {
+
+        MovieResponse movie =
+                movieResponseMapper.toResponse(
+                        watchlist.getMovie()
+                );
+
+        return new WatchlistResponse(
+                movie,
+                watchlist.getStatus(),
+                watchlist.getCreatedAt()
+        );
     }
 }
