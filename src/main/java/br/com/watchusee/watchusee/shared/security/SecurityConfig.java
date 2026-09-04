@@ -27,7 +27,6 @@ public class SecurityConfig {
     ) throws Exception {
 
         http
-
                 .csrf(csrf -> csrf.disable())
 
                 .sessionManagement(session ->
@@ -42,35 +41,49 @@ public class SecurityConfig {
                                 .requestMatchers(
                                         HttpMethod.POST,
                                         "/api/v1/auth/login"
-                                )
-                                .permitAll()
+                                ).permitAll()
 
                                 .requestMatchers(
                                         HttpMethod.POST,
                                         "/api/v1/users"
-                                )
-                                .permitAll()
+                                ).permitAll()
 
                                 .requestMatchers(
                                         HttpMethod.GET,
                                         "/api/v1/movies/**"
-                                )
-                                .permitAll()
+                                ).permitAll()
 
                                 .requestMatchers(
                                         "/swagger-ui/**",
                                         "/swagger-ui.html",
                                         "/v3/api-docs/**"
-                                )
-                                .permitAll()
+                                ).permitAll()
 
                                 .requestMatchers(
                                         "/actuator/health"
-                                )
-                                .permitAll()
+                                ).permitAll()
 
-                                .anyRequest()
-                                .authenticated()
+                                .requestMatchers(
+                                        HttpMethod.GET,
+                                        "/api/v1/watchlist"
+                                ).authenticated()
+
+                                .requestMatchers(
+                                        HttpMethod.GET,
+                                        "/api/v1/watchlist/**"
+                                ).authenticated()
+
+                                .requestMatchers(
+                                        HttpMethod.PUT,
+                                        "/api/v1/watchlist/**"
+                                ).authenticated()
+
+                                .requestMatchers(
+                                        HttpMethod.DELETE,
+                                        "/api/v1/watchlist/**"
+                                ).authenticated()
+
+                                .anyRequest().authenticated()
                 )
 
                 .addFilterBefore(
