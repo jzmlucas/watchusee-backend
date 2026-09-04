@@ -1,0 +1,124 @@
+# ==========================================
+# SEGREDOS, CREDENCIAIS E CONFIGURAÇÕES LOCAIS
+# ==========================================
+
+# Variáveis de ambiente
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Chaves privadas e certificados
+*.pem
+*.key
+*.pkcs12
+*.pfx
+*.p12
+*.jks
+*.keystore
+*.p8
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+
+# Credenciais de cloud
+.aws/
+.kube/
+gcp-key.json
+cloud-key.json
+*-credentials.json
+credentials.json
+
+# ==========================================
+# BUILD / ARTEFATOS GERADOS
+# ==========================================
+
+target/
+build/
+out/
+bin/
+.gradle/
+
+# Arquivos gerados pelo Maven
+*.class
+
+# ==========================================
+# LOGS / RUNTIME
+# ==========================================
+
+*.log
+*.syslog
+*.out
+*.pid
+
+logs/
+log/
+
+# ==========================================
+# IDEs
+# ==========================================
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Eclipse / STS
+.classpath
+.project
+.settings/
+.factorypath
+.apt_generated
+.springBeans
+.sts4-cache/
+
+# VS Code
+.vscode/
+
+# NetBeans
+.nb-gradle/
+nbproject/private/
+nbbuild/
+dist/
+nbdist/
+
+# ==========================================
+# SISTEMA OPERACIONAL
+# ==========================================
+
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+Thumbs.db
+Thumbs.db?
+ehthumbs.db
+desktop.ini
+
+# ==========================================
+# BANCO DE DADOS LOCAL / DUMPS
+# ==========================================
+
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.sqldump
+
+# Dumps SQL locais
+*.sql.bak
+*.sql.tmp
+
+# ==========================================
+# TEMPORÁRIOS
+# ==========================================
+
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
