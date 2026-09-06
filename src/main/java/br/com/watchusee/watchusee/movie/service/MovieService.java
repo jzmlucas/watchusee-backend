@@ -1,10 +1,17 @@
 package br.com.watchusee.watchusee.movie.service;
 
+import br.com.watchusee.watchusee.movie.api.dto.MovieListItemResponse;
+import br.com.watchusee.watchusee.movie.api.dto.MovieListResponse;
+import br.com.watchusee.watchusee.movie.api.dto.MovieReviewItemResponse;
+import br.com.watchusee.watchusee.movie.api.dto.MovieReviewsResponse;
 import br.com.watchusee.watchusee.movie.client.tmdb.TmdbClient;
+import br.com.watchusee.watchusee.movie.client.tmdb.dto.TmdbListsResponse;
 import br.com.watchusee.watchusee.movie.client.tmdb.dto.TmdbMovieResponse;
+import br.com.watchusee.watchusee.movie.client.tmdb.dto.TmdbReviewResponse;
 import br.com.watchusee.watchusee.movie.client.tmdb.dto.TmdbSearchResponse;
 import br.com.watchusee.watchusee.movie.client.tmdb.dto.TmdbVideosResponse;
 import br.com.watchusee.watchusee.movie.domain.Movie;
+import br.com.watchusee.watchusee.movie.dto.MoviePageResult;
 import br.com.watchusee.watchusee.movie.dto.MovieTrailerResponse;
 import br.com.watchusee.watchusee.movie.mapper.MovieMapper;
 import org.springframework.stereotype.Service;
@@ -28,22 +35,12 @@ public class MovieService {
 
     public List<Movie> searchMovies(String query) {
 
-        String normalizedQuery =
-                normalizeQuery(query);
+        String normalizedQuery = normalizeQuery(query);
 
         TmdbSearchResponse response =
                 tmdbClient.searchMovies(normalizedQuery);
 
-        if (response == null ||
-                response.results() == null) {
-
-            return List.of();
-        }
-
-        return response.results()
-                .stream()
-                .map(movieMapper::toDomain)
-                .toList();
+        return mapMovies(response);
     }
 
     public Movie getMovie(Long movieId) {
@@ -54,10 +51,8 @@ public class MovieService {
                 tmdbClient.getMovie(movieId);
 
         if (response == null) {
-
             throw new IllegalStateException(
-                    "O TMDB retornou uma resposta vazia para o filme: "
-                            + movieId
+                    "O TMDB retornou uma resposta vazia para o filme."
             );
         }
 
@@ -70,9 +65,8 @@ public class MovieService {
                 tmdbClient.getTrendingMovies();
 
         if (response == null) {
-
             throw new IllegalStateException(
-                    "Não foi possível obter os filmes em tendência."
+                    "O TMDB retornou uma resposta vazia."
             );
         }
 
@@ -88,10 +82,9 @@ public class MovieService {
                 ThreadLocalRandom.current()
                         .nextInt(response.results().size());
 
-        TmdbMovieResponse randomMovie =
-                response.results().get(randomIndex);
-
-        return movieMapper.toDomain(randomMovie);
+        return movieMapper.toDomain(
+                response.results().get(randomIndex)
+        );
     }
 
     public List<Movie> getTrendingMovies() {
@@ -99,57 +92,177 @@ public class MovieService {
         TmdbSearchResponse response =
                 tmdbClient.getTrendingMovies();
 
-        if (response == null ||
-                response.results() == null) {
-
-            return List.of();
-        }
-
-        return response.results()
-                .stream()
-                .map(movieMapper::toDomain)
-                .toList();
+        return mapMovies(response);
     }
 
-    public List<Movie> getSimilarMovies(Long movieId) {
-
-        validateMovieId(movieId);
-
-        TmdbSearchResponse response =
-                tmdbClient.getSimilarMovies(movieId);
-
-        if (response == null ||
-                response.results() == null) {
-
-            return List.of();
-        }
-
-        return response.results()
-                .stream()
-                .map(movieMapper::toDomain)
-                .toList();
-    }
-
-    public List<Movie> getTopRatedMovies(int page) {
+    public MoviePageResult getTopRatedMovies(int page) {
 
         validatePage(page);
 
         TmdbSearchResponse response =
                 tmdbClient.getTopRatedMovies(page);
 
-        if (response == null ||
-                response.results() == null) {
-
-            return List.of();
-        }
-
-        return response.results()
-                .stream()
-                .map(movieMapper::toDomain)
-                .toList();
+        return mapMoviePage(response);
     }
 
-    public MovieTrailerResponse getMovieTrailer(Long movieId) {
+    public MoviePageResult getPopularMovies(int page) {
+
+        validatePage(page);
+
+        TmdbSearchResponse response =
+                tmdbClient.getPopularMovies(page);
+
+        return mapMoviePage(response);
+    }
+
+    public MoviePageResult getNowPlayingMovies(int page) {
+
+        validatePage(page);
+
+        TmdbSearchResponse response =
+                tmdbClient.getNowPlayingMovies(page);
+
+        return mapMoviePage(response);
+    }
+
+    public MoviePageResult getUpcomingMovies(int page) {
+
+        validatePage(page);
+
+        TmdbSearchResponse response =
+                tmdbClient.getUpcomingMovies(page);
+
+        return mapMoviePage(response);
+    }
+
+    public MoviePageResult getSimilarMovies(
+            Long movieId,
+            int page
+    ) {
+
+        validateMovieId(movieId);
+        validatePage(page);
+
+        TmdbSearchResponse response =
+                tmdbClient.getSimilarMovies(
+                        movieId,
+                        page
+                );
+
+        return mapMoviePage(response);
+    }
+
+    public MoviePageResult getMovieRecommendations(
+            Long movieId,
+            int page
+    ) {
+
+        validateMovieId(movieId);
+        validatePage(page);
+
+        TmdbSearchResponse response =
+                tmdbClient.getMovieRecommendations(
+                        movieId,
+                        page
+                );
+
+        return mapMoviePage(response);
+    }
+
+    public MovieReviewsResponse getMovieReviews(
+            Long movieId,
+            int page
+    ) {
+
+        validateMovieId(movieId);
+        validatePage(page);
+
+        var response =
+                tmdbClient.getMovieReviews(
+                        movieId,
+                        page
+                );
+
+        if (response == null) {
+
+            return new MovieReviewsResponse(
+                    page,
+                    0,
+                    0,
+                    List.of()
+            );
+        }
+
+        List<MovieReviewItemResponse> reviews =
+                response.results() == null
+                        ? List.of()
+                        : response.results()
+                        .stream()
+                        .map(this::toReviewResponse)
+                        .toList();
+
+        return new MovieReviewsResponse(
+                response.page(),
+                response.totalPages(),
+                response.totalResults(),
+                reviews
+        );
+    }
+
+    public MovieListResponse getMovieLists(
+            Long movieId,
+            int page
+    ) {
+
+        validateMovieId(movieId);
+        validatePage(page);
+
+        TmdbListsResponse response =
+                tmdbClient.getMovieLists(
+                        movieId,
+                        page
+                );
+
+        if (response == null) {
+
+            return new MovieListResponse(
+                    page,
+                    0,
+                    0,
+                    List.of()
+            );
+        }
+
+        List<MovieListItemResponse> lists =
+                response.results() == null
+                        ? List.of()
+                        : response.results()
+                        .stream()
+                        .map(list ->
+                                new MovieListItemResponse(
+                                        list.id(),
+                                        list.name(),
+                                        list.description(),
+                                        list.itemCount(),
+                                        list.posterPath(),
+                                        list.backdropPath()
+                                )
+                        )
+                        .toList();
+
+        return new MovieListResponse(
+                response.page(),
+                response.totalPages(),
+                response.totalResults(),
+                lists
+        );
+    }
+
+    public MovieTrailerResponse getMovieTrailer(
+            Long movieId
+    ) {
+
+        validateMovieId(movieId);
 
         TmdbVideosResponse response =
                 tmdbClient.getMovieVideos(movieId);
@@ -163,10 +276,14 @@ public class MovieService {
         return response.results()
                 .stream()
                 .filter(video ->
-                        "Trailer".equalsIgnoreCase(video.type())
+                        "Trailer".equalsIgnoreCase(
+                                video.type()
+                        )
                 )
                 .filter(video ->
-                        "YouTube".equalsIgnoreCase(video.site())
+                        "YouTube".equalsIgnoreCase(
+                                video.site()
+                        )
                 )
                 .findFirst()
                 .map(video ->
@@ -180,32 +297,96 @@ public class MovieService {
                 .orElse(null);
     }
 
+    private List<Movie> mapMovies(
+            TmdbSearchResponse response
+    ) {
+
+        if (response == null ||
+                response.results() == null) {
+
+            return List.of();
+        }
+
+        return response.results()
+                .stream()
+                .map(movieMapper::toDomain)
+                .toList();
+    }
+
+    private MoviePageResult mapMoviePage(
+            TmdbSearchResponse response
+    ) {
+
+        if (response == null) {
+            return new MoviePageResult(
+                    1,
+                    0,
+                    0,
+                    List.of()
+            );
+        }
+
+        List<Movie> movies =
+                response.results() == null
+                        ? List.of()
+                        : response.results()
+                        .stream()
+                        .map(movieMapper::toDomain)
+                        .toList();
+
+        return new MoviePageResult(
+                response.page(),
+                response.totalPages(),
+                response.totalResults(),
+                movies
+        );
+    }
+
+    private MovieReviewItemResponse toReviewResponse(
+            TmdbReviewResponse review
+    ) {
+
+        String username = null;
+        String avatarPath = null;
+        Double rating = null;
+
+        if (review.authorDetails() != null) {
+
+            username =
+                    review.authorDetails().username();
+
+            avatarPath =
+                    review.authorDetails().avatarPath();
+
+            rating =
+                    review.authorDetails().rating();
+        }
+
+        return new MovieReviewItemResponse(
+                review.id(),
+                review.author(),
+                username,
+                avatarPath,
+                rating,
+                review.content(),
+                review.createdAt(),
+                review.updatedAt(),
+                review.url()
+        );
+    }
+
     private String normalizeQuery(String query) {
 
         if (query == null) {
-
-            throw new IllegalArgumentException(
-                    "A busca do filme não pode ser nula."
-            );
+            return null;
         }
 
-        String normalizedQuery =
-                query.trim();
-
-        if (normalizedQuery.isBlank()) {
-
-            throw new IllegalArgumentException(
-                    "A busca do filme não pode estar vazia."
-            );
-        }
-
-        return normalizedQuery;
+        return query.trim();
     }
 
     private void validateMovieId(Long movieId) {
 
-        if (movieId == null ||
-                movieId <= 0) {
+        if (movieId == null || movieId <= 0) {
 
             throw new IllegalArgumentException(
                     "O ID do filme deve ser maior que zero."
@@ -222,4 +403,5 @@ public class MovieService {
             );
         }
     }
+
 }

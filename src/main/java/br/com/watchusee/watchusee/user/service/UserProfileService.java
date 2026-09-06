@@ -1,5 +1,8 @@
 package br.com.watchusee.watchusee.user.service;
 
+import br.com.watchusee.watchusee.friend.domain.FriendshipStatus;
+import br.com.watchusee.watchusee.friend.repository.FriendshipRepository;
+import br.com.watchusee.watchusee.user.api.dto.FavoriteMovieResponse;
 import br.com.watchusee.watchusee.user.api.dto.UserProfileResponse;
 import br.com.watchusee.watchusee.user.domain.User;
 import br.com.watchusee.watchusee.user.exception.UserNotFoundException;
@@ -14,13 +17,16 @@ public class UserProfileService {
 
     private final UserRepository userRepository;
     private final WatchlistRepository watchlistRepository;
+    private final FriendshipRepository friendshipRepository;
 
     public UserProfileService(
             UserRepository userRepository,
-            WatchlistRepository watchlistRepository
+            WatchlistRepository watchlistRepository,
+            FriendshipRepository friendshipRepository
     ) {
         this.userRepository = userRepository;
         this.watchlistRepository = watchlistRepository;
+        this.friendshipRepository = friendshipRepository;
     }
 
     @Transactional(readOnly = true)
@@ -47,12 +53,37 @@ public class UserProfileService {
                         WatchlistStatus.TO_WATCH
                 );
 
+        long friendsCount =
+                friendshipRepository
+                        .countByRequesterIdAndStatus(
+                                userId,
+                                FriendshipStatus.ACCEPTED
+                        )
+                        +
+                        friendshipRepository
+                                .countByReceiverIdAndStatus(
+                                        userId,
+                                        FriendshipStatus.ACCEPTED
+                                );
+
+        FavoriteMovieResponse favoriteMovieResponse =
+                user.getFavoriteMovie() == null
+                        ? null
+                        : new FavoriteMovieResponse(
+                        user.getFavoriteMovie().getId(),
+                        user.getFavoriteMovie().getTitle(),
+                        user.getFavoriteMovie().getPosterPath()
+                );
+
         return new UserProfileResponse(
                 user.getId(),
                 user.getNick(),
                 user.getCreatedAt(),
                 watchedMovies,
-                toWatchMovies
+                toWatchMovies,
+                friendsCount,
+                user.getAvatarIcon(),
+                favoriteMovieResponse
         );
     }
 }

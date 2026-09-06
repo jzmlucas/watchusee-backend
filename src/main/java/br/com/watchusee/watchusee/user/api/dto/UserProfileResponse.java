@@ -1,5 +1,7 @@
 package br.com.watchusee.watchusee.user.api.dto;
 
+import br.com.watchusee.watchusee.user.domain.AvatarIcon;
+
 import java.time.Instant;
 
 public record UserProfileResponse(
@@ -7,6 +9,9 @@ public record UserProfileResponse(
         String nick,
         Instant createdAt,
         long watchedMovies,
-        long toWatchMovies
+        long toWatchMovies,
+        long friendsCount,
+        AvatarIcon avatarIcon,
+        FavoriteMovieResponse favoriteMovie
 ) {
 }

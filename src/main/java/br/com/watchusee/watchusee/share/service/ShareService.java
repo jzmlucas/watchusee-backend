@@ -27,13 +27,6 @@ public class ShareService {
         this.userRepository = userRepository;
     }
 
-    /**
-     * Cria um compartilhamento.
-     *
-     * O senderId vem do AuthenticatedUser.
-     *
-     * O frontend nunca envia o ID do remetente.
-     */
     @Transactional
     public ShareResponse createShare(
             Long senderId,

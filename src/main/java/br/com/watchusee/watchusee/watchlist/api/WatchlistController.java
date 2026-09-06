@@ -49,7 +49,7 @@ public class WatchlistController {
 
     @GetMapping
     @Operation(
-            summary = "Listar filmes da watchlist"
+            summary = "Listar filmes da própria watchlist"
     )
     public ResponseEntity<PageResponse<WatchlistResponse>> findAll(
 
@@ -68,11 +68,9 @@ public class WatchlistController {
             @Min(1)
             @Max(100)
             int size
-
     ) {
 
-        Long userId =
-                authenticatedUser.getId();
+        Long userId = authenticatedUser.getId();
 
         Pageable pageable =
                 PageRequest.of(
@@ -109,14 +107,13 @@ public class WatchlistController {
 
     @GetMapping("/{movieId}")
     @Operation(
-            summary = "Consultar filme na watchlist"
+            summary = "Consultar filme na própria watchlist"
     )
     public ResponseEntity<WatchlistResponse> get(
             @PathVariable @Positive Long movieId
     ) {
 
-        Long userId =
-                authenticatedUser.getId();
+        Long userId = authenticatedUser.getId();
 
         Watchlist watchlist =
                 watchlistService.get(
@@ -139,11 +136,9 @@ public class WatchlistController {
 
             @RequestBody @Valid
             UpdateWatchlistRequest request
-
     ) {
 
-        Long userId =
-                authenticatedUser.getId();
+        Long userId = authenticatedUser.getId();
 
         Watchlist watchlist =
                 watchlistService.updateStatus(
@@ -159,14 +154,13 @@ public class WatchlistController {
 
     @DeleteMapping("/{movieId}")
     @Operation(
-            summary = "Remover filme da watchlist"
+            summary = "Remover filme da própria watchlist"
     )
     public ResponseEntity<Void> remove(
             @PathVariable @Positive Long movieId
     ) {
 
-        Long userId =
-                authenticatedUser.getId();
+        Long userId = authenticatedUser.getId();
 
         watchlistService.remove(
                 userId,

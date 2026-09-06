@@ -29,9 +29,6 @@ public class Share {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /**
-     * Usuário que enviou o compartilhamento.
-     */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(
             name = "sender_id",
@@ -39,9 +36,6 @@ public class Share {
     )
     private User sender;
 
-    /**
-     * Usuário que recebeu o compartilhamento.
-     */
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(
             name = "recipient_id",
@@ -49,27 +43,18 @@ public class Share {
     )
     private User recipient;
 
-    /**
-     * ID do filme no TMDB.
-     */
     @Column(
             name = "movie_id",
             nullable = false
     )
     private Long movieId;
 
-    /**
-     * Mensagem opcional enviada junto com o filme.
-     */
     @Column(
             name = "message",
             length = 500
     )
     private String message;
 
-    /**
-     * Estado atual do compartilhamento.
-     */
     @Enumerated(EnumType.STRING)
     @Column(
             name = "status",
@@ -78,9 +63,6 @@ public class Share {
     )
     private ShareStatus status;
 
-    /**
-     * Data de criação do compartilhamento.
-     */
     @Column(
             name = "created_at",
             nullable = false,

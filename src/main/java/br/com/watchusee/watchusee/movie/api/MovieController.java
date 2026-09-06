@@ -1,7 +1,11 @@
 package br.com.watchusee.watchusee.movie.api;
 
+import br.com.watchusee.watchusee.movie.api.dto.MovieListResponse;
+import br.com.watchusee.watchusee.movie.api.dto.MoviePageResponse;
 import br.com.watchusee.watchusee.movie.api.dto.MovieResponse;
+import br.com.watchusee.watchusee.movie.api.dto.MovieReviewsResponse;
 import br.com.watchusee.watchusee.movie.domain.Movie;
+import br.com.watchusee.watchusee.movie.dto.MoviePageResult;
 import br.com.watchusee.watchusee.movie.dto.MovieTrailerResponse;
 import br.com.watchusee.watchusee.movie.mapper.MovieResponseMapper;
 import br.com.watchusee.watchusee.movie.service.MovieService;
@@ -14,7 +18,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -50,13 +57,13 @@ public class MovieController {
     @Operation(
             summary = "Pesquisar filmes",
             description = """
-                    Pesquisa filmes utilizando um termo informado pelo cliente.
+                Pesquisa filmes utilizando um termo informado pelo cliente.
 
-                    A busca é realizada através da API do TMDB.
-                    O resultado contém os filmes encontrados pelo serviço externo.
+                A busca é realizada através da API do TMDB.
+                O resultado contém os filmes encontrados pelo serviço externo.
 
-                    O termo deve possuir entre 2 e 100 caracteres.
-                    """,
+                O termo deve possuir entre 2 e 100 caracteres.
+                """,
             operationId = "searchMovies"
     )
     @ApiResponses({
@@ -70,17 +77,17 @@ public class MovieController {
                             ),
                             examples = @ExampleObject(
                                     value = """
-                                            [
-                                              {
-                                                "id": 414906,
-                                                "title": "The Batman",
-                                                "overview": "In his second year of fighting crime, Batman uncovers corruption in Gotham City that connects to his own family while facing a serial killer known as the Riddler.",
-                                                "releaseDate": "2022-03-01",
-                                                "posterPath": "/74xTEgt7R36Fpooo50r9T25onhq.jpg",
-                                                "rating": 7.668
-                                              }
-                                            ]
-                                            """
+                                        [
+                                          {
+                                            "id": 414906,
+                                            "title": "The Batman",
+                                            "overview": "In his second year of fighting crime, Batman uncovers corruption in Gotham City that connects to his own family while facing a serial killer known as the Riddler.",
+                                            "releaseDate": "2022-03-01",
+                                            "posterPath": "/74xTEgt7R36Fpooo50r9T25onhq.jpg",
+                                            "rating": 7.668
+                                          }
+                                        ]
+                                        """
                             )
                     )
             ),
@@ -91,17 +98,6 @@ public class MovieController {
                             mediaType = "application/json",
                             schema = @Schema(
                                     implementation = ErrorResponse.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                            {
-                                              "timestamp": "2026-08-26T04:30:00Z",
-                                              "status": 400,
-                                              "error": "Bad Request",
-                                              "message": "O termo de busca deve possuir entre 2 e 100 caracteres.",
-                                              "path": "/api/v1/movies/search"
-                                            }
-                                            """
                             )
                     )
             ),
@@ -112,17 +108,6 @@ public class MovieController {
                             mediaType = "application/json",
                             schema = @Schema(
                                     implementation = ErrorResponse.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                            {
-                                              "timestamp": "2026-08-26T04:30:00Z",
-                                              "status": 502,
-                                              "error": "Bad Gateway",
-                                              "message": "Erro ao buscar filmes no TMDB.",
-                                              "path": "/api/v1/movies/search"
-                                            }
-                                            """
                             )
                     )
             )
@@ -144,7 +129,8 @@ public class MovieController {
             String query
     ) {
 
-        List<Movie> movies = movieService.searchMovies(query);
+        List<Movie> movies =
+                movieService.searchMovies(query);
 
         return movies.stream()
                 .map(movieResponseMapper::toResponse)
@@ -155,69 +141,15 @@ public class MovieController {
     @Operation(
             summary = "Obter filme aleatório em tendência",
             description = """
-                    Retorna aleatoriamente um filme atualmente em tendência
-                    no TMDB.
-
-                    Os filmes em tendência são obtidos através do endpoint
-                    de tendências do TMDB utilizando a janela semanal.
-
-                    A aplicação seleciona aleatoriamente um filme entre os
-                    resultados retornados pelo serviço externo.
-
-                    Esse endpoint é destinado principalmente à descoberta
-                    de conteúdo e pode ser utilizado pela tela inicial
-                    da aplicação.
-                    """,
+                Retorna aleatoriamente um filme atualmente em tendência
+                no TMDB.
+                """,
             operationId = "getRandomTrendingMovie"
     )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Filme em tendência encontrado com sucesso.",
-                    content = @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(
-                                    implementation = MovieResponse.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                            {
-                                              "id": 414906,
-                                              "title": "The Batman",
-                                              "overview": "In his second year of fighting crime, Batman uncovers corruption in Gotham City that connects to his own family while facing a serial killer known as the Riddler.",
-                                              "releaseDate": "2022-03-01",
-                                              "posterPath": "/74xTEgt7R36Fpooo50r9T25onhq.jpg",
-                                              "rating": 7.668
-                                            }
-                                            """
-                            )
-                    )
-            ),
-            @ApiResponse(
-                    responseCode = "502",
-                    description = "Erro na comunicação com o TMDB.",
-                    content = @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(
-                                    implementation = ErrorResponse.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                            {
-                                              "timestamp": "2026-08-26T04:30:00Z",
-                                              "status": 502,
-                                              "error": "Bad Gateway",
-                                              "message": "Erro ao buscar filmes em tendência no TMDB.",
-                                              "path": "/api/v1/movies/trending/random"
-                                            }
-                                            """
-                            )
-                    )
-            )
-    })
     public MovieResponse getRandomTrendingMovie() {
 
-        Movie movie = movieService.getRandomTrendingMovie();
+        Movie movie =
+                movieService.getRandomTrendingMovie();
 
         return movieResponseMapper.toResponse(movie);
     }
@@ -241,13 +173,286 @@ public class MovieController {
                 .toList();
     }
 
+    @GetMapping("/popular")
+    @Operation(
+            summary = "Obter filmes populares",
+            description = """
+                Retorna os filmes atualmente mais populares
+                de acordo com o TMDB.
+
+                Os resultados são paginados.
+                """,
+            operationId = "getPopularMovies"
+    )
+    public MoviePageResponse getPopularMovies(
+
+            @Parameter(
+                    description = "Número da página de resultados.",
+                    example = "1"
+            )
+            @RequestParam(defaultValue = "1")
+            @Min(1)
+            @Max(1000)
+            int page
+
+    ) {
+
+        MoviePageResult result =
+                movieService.getPopularMovies(page);
+
+        return toMoviePageResponse(result);
+    }
+
+    @GetMapping("/now-playing")
+    @Operation(
+            summary = "Obter filmes em cartaz",
+            description = """
+                Retorna filmes atualmente em cartaz
+                nos cinemas, segundo o TMDB.
+
+                Os resultados são paginados.
+                """,
+            operationId = "getNowPlayingMovies"
+    )
+    public MoviePageResponse getNowPlayingMovies(
+
+            @Parameter(
+                    description = "Número da página de resultados.",
+                    example = "1"
+            )
+            @RequestParam(defaultValue = "1")
+            @Min(1)
+            @Max(1000)
+            int page
+
+    ) {
+
+        MoviePageResult result =
+                movieService.getNowPlayingMovies(page);
+
+        return toMoviePageResponse(result);
+    }
+
+    @GetMapping("/upcoming")
+    @Operation(
+            summary = "Obter próximos lançamentos",
+            description = """
+                Retorna filmes com lançamento previsto
+                de acordo com o TMDB.
+
+                Os resultados são paginados.
+                """,
+            operationId = "getUpcomingMovies"
+    )
+    public MoviePageResponse getUpcomingMovies(
+
+            @Parameter(
+                    description = "Número da página de resultados.",
+                    example = "1"
+            )
+            @RequestParam(defaultValue = "1")
+            @Min(1)
+            @Max(1000)
+            int page
+
+    ) {
+
+        MoviePageResult result =
+                movieService.getUpcomingMovies(page);
+
+        return toMoviePageResponse(result);
+    }
+
+    @GetMapping("/top-rated")
+    @Operation(
+            summary = "Obter filmes mais bem avaliados",
+            description = """
+                Retorna filmes mais bem avaliados
+                de acordo com o TMDB.
+
+                Os resultados são paginados.
+                """,
+            operationId = "getTopRatedMovies"
+    )
+    public MoviePageResponse getTopRatedMovies(
+
+            @Parameter(
+                    description = "Número da página de resultados.",
+                    example = "1"
+            )
+            @RequestParam(defaultValue = "1")
+            @Min(1)
+            @Max(1000)
+            int page
+
+    ) {
+
+        MoviePageResult result =
+                movieService.getTopRatedMovies(page);
+
+        return toMoviePageResponse(result);
+    }
+
+    @GetMapping("/{movieId}/similar")
+    @Operation(
+            summary = "Consultar filmes similares",
+            description = """
+                Retorna filmes similares ao filme informado.
+
+                Os resultados são paginados.
+                """,
+            operationId = "getSimilarMovies"
+    )
+    public MoviePageResponse getSimilarMovies(
+
+            @Parameter(
+                    description = "ID do filme no TMDB.",
+                    example = "550",
+                    required = true
+            )
+            @PathVariable @Positive Long movieId,
+
+            @Parameter(
+                    description = "Número da página de resultados.",
+                    example = "1"
+            )
+            @RequestParam(defaultValue = "1")
+            @Min(1)
+            @Max(1000)
+            int page
+
+    ) {
+
+        MoviePageResult result =
+                movieService.getSimilarMovies(
+                        movieId,
+                        page
+                );
+
+        return toMoviePageResponse(result);
+    }
+
+    @GetMapping("/{movieId}/recommendations")
+    @Operation(
+            summary = "Consultar filmes recomendados",
+            description = """
+                Retorna filmes recomendados pelo TMDB
+                com base no filme informado.
+
+                Os resultados são paginados.
+                """,
+            operationId = "getMovieRecommendations"
+    )
+    public MoviePageResponse getMovieRecommendations(
+
+            @Parameter(
+                    description = "ID do filme no TMDB.",
+                    example = "550",
+                    required = true
+            )
+            @PathVariable @Positive Long movieId,
+
+            @Parameter(
+                    description = "Número da página de resultados.",
+                    example = "1"
+            )
+            @RequestParam(defaultValue = "1")
+            @Min(1)
+            @Max(1000)
+            int page
+
+    ) {
+
+        MoviePageResult result =
+                movieService.getMovieRecommendations(
+                        movieId,
+                        page
+                );
+
+        return toMoviePageResponse(result);
+    }
+
+    @GetMapping("/{movieId}/reviews")
+    @Operation(
+            summary = "Consultar avaliações do filme",
+            description = """
+                Retorna as avaliações realizadas por usuários
+                para o filme informado.
+
+                Os resultados são paginados.
+                """,
+            operationId = "getMovieReviews"
+    )
+    public MovieReviewsResponse getMovieReviews(
+
+            @Parameter(
+                    description = "ID do filme no TMDB.",
+                    example = "550",
+                    required = true
+            )
+            @PathVariable @Positive Long movieId,
+
+            @Parameter(
+                    description = "Número da página de resultados.",
+                    example = "1"
+            )
+            @RequestParam(defaultValue = "1")
+            @Min(1)
+            @Max(1000)
+            int page
+
+    ) {
+
+        return movieService.getMovieReviews(
+                movieId,
+                page
+        );
+    }
+
+    @GetMapping("/{movieId}/lists")
+    @Operation(
+            summary = "Consultar listas do filme",
+            description = """
+                Retorna as listas públicas do TMDB
+                que contêm o filme informado.
+
+                Os resultados são paginados.
+                """,
+            operationId = "getMovieLists"
+    )
+    public MovieListResponse getMovieLists(
+
+            @Parameter(
+                    description = "ID do filme no TMDB.",
+                    example = "550",
+                    required = true
+            )
+            @PathVariable @Positive Long movieId,
+
+            @Parameter(
+                    description = "Número da página de resultados.",
+                    example = "1"
+            )
+            @RequestParam(defaultValue = "1")
+            @Min(1)
+            @Max(1000)
+            int page
+
+    ) {
+
+        return movieService.getMovieLists(
+                movieId,
+                page
+        );
+    }
+
     @GetMapping("/{movieId}/trailer")
     @Operation(
             summary = "Buscar trailer do filme",
             description = "Retorna o trailer principal do filme."
     )
     public ResponseEntity<MovieTrailerResponse> getMovieTrailer(
-            @PathVariable Long movieId
+            @PathVariable @Positive Long movieId
     ) {
 
         MovieTrailerResponse trailer =
@@ -260,184 +465,13 @@ public class MovieController {
         return ResponseEntity.ok(trailer);
     }
 
-    @GetMapping("/top-rated")
-    @Operation(
-            summary = "Obter filmes mais bem avaliados",
-            description = """
-                Retorna uma lista de filmes mais bem avaliados
-                de acordo com as avaliações disponíveis no TMDB.
-
-                Os resultados são obtidos diretamente através do
-                endpoint /3/movie/top_rated do TMDB.
-
-                A página permite controlar a paginação dos resultados.
-
-                Esse endpoint é público e pode ser utilizado por
-                usuários autenticados ou visitantes.
-                """,
-            operationId = "getTopRatedMovies"
-    )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Filmes mais bem avaliados encontrados com sucesso.",
-                    content = @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(
-                                    implementation = MovieResponse.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                        [
-                                          {
-                                            "id": 278,
-                                            "title": "Um Sonho de Liberdade",
-                                            "overview": "Um banqueiro é condenado...",
-                                            "releaseDate": "1994-09-23",
-                                            "posterPath": "/...",
-                                            "rating": 8.7
-                                          }
-                                        ]
-                                        """
-                            )
-                    )
-            ),
-            @ApiResponse(
-                    responseCode = "400",
-                    description = "Página inválida.",
-                    content = @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(
-                                    implementation = ErrorResponse.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                        {
-                                          "timestamp": "2026-08-29T12:00:00Z",
-                                          "status": 400,
-                                          "error": "Bad Request",
-                                          "message": "A página deve ser maior que zero.",
-                                          "path": "/api/v1/movies/top-rated"
-                                        }
-                                        """
-                            )
-                    )
-            ),
-            @ApiResponse(
-                    responseCode = "502",
-                    description = "Erro na comunicação com o TMDB.",
-                    content = @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(
-                                    implementation = ErrorResponse.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                        {
-                                          "timestamp": "2026-08-29T12:00:00Z",
-                                          "status": 502,
-                                          "error": "Bad Gateway",
-                                          "message": "Erro ao buscar filmes mais bem avaliados no TMDB.",
-                                          "path": "/api/v1/movies/top-rated"
-                                        }
-                                        """
-                            )
-                    )
-            )
-    })
-    public List<MovieResponse> getTopRatedMovies(
-
-            @Parameter(
-                    description = "Número da página de resultados.",
-                    example = "1"
-            )
-            @RequestParam(
-                    defaultValue = "1"
-            )
-            int page
-
-    ) {
-
-        List<Movie> movies =
-                movieService.getTopRatedMovies(page);
-
-        return movies.stream()
-                .map(movieResponseMapper::toResponse)
-                .toList();
-    }
-
-    @GetMapping("/{movieId}/similar")
-    @Operation(
-            summary = "Consultar filmes similares",
-            description = """
-                Retorna filmes similares ao filme informado.
-
-                A busca é realizada através do endpoint de filmes
-                similares do TMDB.
-
-                Os resultados são baseados principalmente em gêneros
-                e palavras-chave relacionadas ao enredo do filme.
-                """,
-            operationId = "getSimilarMovies"
-    )
-    @ApiResponses({
-            @ApiResponse(
-                    responseCode = "200",
-                    description = "Filmes similares encontrados com sucesso.",
-                    content = @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(
-                                    implementation = MovieResponse.class
-                            )
-                    )
-            ),
-            @ApiResponse(
-                    responseCode = "400",
-                    description = "ID do filme inválido.",
-                    content = @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(
-                                    implementation = ErrorResponse.class
-                            )
-                    )
-            ),
-            @ApiResponse(
-                    responseCode = "502",
-                    description = "Erro na comunicação com o TMDB.",
-                    content = @Content(
-                            mediaType = "application/json",
-                            schema = @Schema(
-                                    implementation = ErrorResponse.class
-                            )
-                    )
-            )
-    })
-    public List<MovieResponse> getSimilarMovies(
-
-            @Parameter(
-                    description = "ID do filme no TMDB.",
-                    example = "550",
-                    required = true
-            )
-            @PathVariable Long movieId
-    ) {
-
-        List<Movie> movies =
-                movieService.getSimilarMovies(movieId);
-
-        return movies.stream()
-                .map(movieResponseMapper::toResponse)
-                .toList();
-    }
-
     @GetMapping("/{movieId}")
     @Operation(
             summary = "Consultar filme por ID",
             description = """
-                    Retorna os detalhes de um filme utilizando o ID do TMDB.
-
-                    O filme é consultado diretamente no serviço externo.
-                    """,
+                Retorna os detalhes de um filme utilizando
+                o ID do TMDB.
+                """,
             operationId = "getMovieById"
     )
     @ApiResponses({
@@ -448,18 +482,6 @@ public class MovieController {
                             mediaType = "application/json",
                             schema = @Schema(
                                     implementation = MovieResponse.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                            {
-                                              "id": 414906,
-                                              "title": "The Batman",
-                                              "overview": "In his second year of fighting crime, Batman uncovers corruption in Gotham City that connects to his own family while facing a serial killer known as the Riddler.",
-                                              "releaseDate": "2022-03-01",
-                                              "posterPath": "/74xTEgt7R36Fpooo50r9T25onhq.jpg",
-                                              "rating": 7.668
-                                            }
-                                            """
                             )
                     )
             ),
@@ -470,17 +492,6 @@ public class MovieController {
                             mediaType = "application/json",
                             schema = @Schema(
                                     implementation = ErrorResponse.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                            {
-                                              "timestamp": "2026-08-26T04:30:00Z",
-                                              "status": 404,
-                                              "error": "Not Found",
-                                              "message": "Filme não encontrado no TMDB: 999999999",
-                                              "path": "/api/v1/movies/999999999"
-                                            }
-                                            """
                             )
                     )
             ),
@@ -491,17 +502,6 @@ public class MovieController {
                             mediaType = "application/json",
                             schema = @Schema(
                                     implementation = ErrorResponse.class
-                            ),
-                            examples = @ExampleObject(
-                                    value = """
-                                            {
-                                              "timestamp": "2026-08-26T04:30:00Z",
-                                              "status": 502,
-                                              "error": "Bad Gateway",
-                                              "message": "Erro ao buscar filme no TMDB.",
-                                              "path": "/api/v1/movies/999999999"
-                                            }
-                                            """
                             )
                     )
             )
@@ -513,11 +513,31 @@ public class MovieController {
                     example = "414906",
                     required = true
             )
-            @PathVariable Long movieId
+            @PathVariable @Positive Long movieId
+
     ) {
 
-        Movie movie = movieService.getMovie(movieId);
+        Movie movie =
+                movieService.getMovie(movieId);
 
         return movieResponseMapper.toResponse(movie);
     }
+    private MoviePageResponse toMoviePageResponse(
+            MoviePageResult result
+    ) {
+
+        List<MovieResponse> responses =
+                result.results()
+                        .stream()
+                        .map(movieResponseMapper::toResponse)
+                        .toList();
+
+        return new MoviePageResponse(
+                result.page(),
+                result.totalPages(),
+                result.totalResults(),
+                responses
+        );
+    }
+
 }

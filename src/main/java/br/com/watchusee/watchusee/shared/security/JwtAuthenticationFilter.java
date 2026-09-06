@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.Collections;
 
 @Component
@@ -23,9 +24,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             LoggerFactory.getLogger(JwtAuthenticationFilter.class);
 
     private final JwtService jwtService;
+    private final TokenValidityService tokenValidityService;
 
-    public JwtAuthenticationFilter(JwtService jwtService) {
+    public JwtAuthenticationFilter(
+            JwtService jwtService,
+            TokenValidityService tokenValidityService
+    ) {
         this.jwtService = jwtService;
+        this.tokenValidityService = tokenValidityService;
     }
 
     @Override
@@ -38,7 +44,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String authorizationHeader =
                 request.getHeader(HttpHeaders.AUTHORIZATION);
 
-        log.info(
+        log.debug(
                 "JWT Filter - {} {} - Authorization presente: {}",
                 request.getMethod(),
                 request.getRequestURI(),
@@ -47,12 +53,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         if (authorizationHeader == null ||
                 !authorizationHeader.startsWith("Bearer ")) {
-
-            log.warn(
-                    "JWT Filter - Token ausente para {} {}",
-                    request.getMethod(),
-                    request.getRequestURI()
-            );
 
             filterChain.doFilter(request, response);
             return;
@@ -65,20 +65,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         if (token.isBlank()) {
 
-            log.warn(
-                    "JWT Filter - Token vazio para {} {}",
-                    request.getMethod(),
-                    request.getRequestURI()
-            );
-
             filterChain.doFilter(request, response);
             return;
         }
 
         if (!jwtService.isValid(token)) {
 
-            log.warn(
-                    "JWT Filter - Token inválido para {} {}",
+            log.debug(
+                    "JWT Filter - Token inválido/expirado/revogado para {} {}",
                     request.getMethod(),
                     request.getRequestURI()
             );
@@ -93,6 +87,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             Long userId =
                     jwtService.extractUserId(token);
+
+            Instant issuedAt =
+                    jwtService.extractIssuedAt(token);
+
+            if (!tokenValidityService.isTokenValid(userId, issuedAt)) {
+
+                log.debug(
+                        "JWT Filter - Token emitido antes de invalidação de sessão. userId={}",
+                        userId
+                );
+
+                SecurityContextHolder.clearContext();
+                filterChain.doFilter(request, response);
+                return;
+            }
 
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(
@@ -110,7 +119,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     .getContext()
                     .setAuthentication(authentication);
 
-            log.info(
+            log.debug(
                     "JWT Filter - Usuário autenticado com sucesso. userId={}",
                     userId
             );
@@ -119,9 +128,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             SecurityContextHolder.clearContext();
 
-            log.error(
-                    "JWT Filter - Erro ao processar token",
-                    exception
+            log.warn(
+                    "JWT Filter - Erro ao processar token: {}",
+                    exception.getMessage()
             );
         }
 

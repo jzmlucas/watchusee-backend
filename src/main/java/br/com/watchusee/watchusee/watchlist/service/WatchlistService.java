@@ -123,12 +123,11 @@ public class WatchlistService {
             );
         }
 
-        return watchlistRepository
-                .findAllByUserIdAndStatus(
-                        userId,
-                        status,
-                        pageable
-                );
+        return watchlistRepository.findAllByUserIdAndStatus(
+                userId,
+                status,
+                pageable
+        );
     }
 
     private User findUser(Long userId) {

@@ -3,6 +3,7 @@ package br.com.watchusee.watchusee.user.repository;
 import br.com.watchusee.watchusee.user.domain.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface UserRepository extends JpaRepository<User, Long> {
@@ -10,4 +11,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByNick(String nick);
 
     boolean existsByNick(String nick);
+
+    List<User> findTop20ByNickContainingIgnoreCaseOrderByNickAsc(
+            String nick
+    );
 }

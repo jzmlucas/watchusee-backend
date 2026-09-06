@@ -1,5 +1,7 @@
 package br.com.watchusee.watchusee.shared.security;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -8,17 +10,29 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final RateLimitingFilter rateLimitingFilter;
+
+    @Value("${security.cors.allowed-origins:http://localhost:3000,http://localhost:5173}")
+    private List<String> allowedOrigins;
 
     public SecurityConfig(
-            JwtAuthenticationFilter jwtAuthenticationFilter
+            JwtAuthenticationFilter jwtAuthenticationFilter,
+            RateLimitingFilter rateLimitingFilter
     ) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.rateLimitingFilter = rateLimitingFilter;
     }
 
     @Bean
@@ -29,9 +43,23 @@ public class SecurityConfig {
         http
                 .csrf(csrf -> csrf.disable())
 
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(
                                 SessionCreationPolicy.STATELESS
+                        )
+                )
+
+                .headers(headers -> headers
+                        .frameOptions(frameOptions -> frameOptions.deny())
+                        .contentTypeOptions(contentTypeOptions -> {})
+                        .referrerPolicy(referrer -> referrer
+                                .policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN)
+                        )
+                        .httpStrictTransportSecurity(hsts -> hsts
+                                .includeSubDomains(true)
+                                .maxAgeInSeconds(31536000)
                         )
                 )
 
@@ -42,6 +70,11 @@ public class SecurityConfig {
                                         HttpMethod.POST,
                                         "/api/v1/auth/login"
                                 ).permitAll()
+
+                                .requestMatchers(
+                                        HttpMethod.POST,
+                                        "/api/v1/auth/logout"
+                                ).authenticated()
 
                                 .requestMatchers(
                                         HttpMethod.POST,
@@ -62,6 +95,22 @@ public class SecurityConfig {
                                 .requestMatchers(
                                         "/actuator/health"
                                 ).permitAll()
+
+
+                                .requestMatchers(
+                                        HttpMethod.GET,
+                                        "/api/v1/users/search"
+                                ).authenticated()
+
+                                .requestMatchers(
+                                        HttpMethod.GET,
+                                        "/api/v1/users/*/profile"
+                                ).authenticated()
+
+                                .requestMatchers(
+                                        HttpMethod.PUT,
+                                        "/api/v1/users/me/password"
+                                ).authenticated()
 
                                 .requestMatchers(
                                         HttpMethod.GET,
@@ -87,10 +136,59 @@ public class SecurityConfig {
                 )
 
                 .addFilterBefore(
-                        jwtAuthenticationFilter,
+                        rateLimitingFilter,
                         UsernamePasswordAuthenticationFilter.class
+                )
+
+                .addFilterAfter(
+                        jwtAuthenticationFilter,
+                        RateLimitingFilter.class
                 );
 
         return http.build();
+    }
+
+    private CorsConfigurationSource corsConfigurationSource() {
+
+        CorsConfiguration configuration = new CorsConfiguration();
+
+        configuration.setAllowedOrigins(allowedOrigins);
+        configuration.setAllowedMethods(
+                List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+        );
+        configuration.setAllowedHeaders(
+                List.of("Authorization", "Content-Type", "Accept")
+        );
+        configuration.setExposedHeaders(List.of("Retry-After"));
+
+        configuration.setAllowCredentials(false);
+        configuration.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source =
+                new UrlBasedCorsConfigurationSource();
+
+        source.registerCorsConfiguration("/**", configuration);
+
+        return source;
+    }
+
+    @Bean
+    public FilterRegistrationBean<JwtAuthenticationFilter> disableJwtFilterAutoRegistration(
+            JwtAuthenticationFilter filter
+    ) {
+        FilterRegistrationBean<JwtAuthenticationFilter> registration =
+                new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<RateLimitingFilter> disableRateLimitingFilterAutoRegistration(
+            RateLimitingFilter filter
+    ) {
+        FilterRegistrationBean<RateLimitingFilter> registration =
+                new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
     }
 }
