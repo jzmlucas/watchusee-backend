@@ -77,7 +77,7 @@ public class UserWatchlistController {
             @Min(0)
             int page,
 
-            @RequestParam(defaultValue = "100")
+            @RequestParam(defaultValue = "99")
             @Min(1)
             @Max(100)
             int size
