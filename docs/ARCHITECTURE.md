@@ -180,6 +180,8 @@ Note que `Share.movieId` é um `Long` solto, não uma relação JPA para `Movie`
 
 ### Visão geral do fluxo
 
+<details>
+
 ```mermaid
 flowchart TD
     Login["POST /api/v1/auth/login"] --> Check1{"Conta bloqueada?"}
@@ -197,6 +199,8 @@ flowchart TD
     Valid -->|Sim| Ctx["SecurityContext populado com userId"]
     Ctx --> Controller
 ```
+
+</details>
 
 ### Componentes
 

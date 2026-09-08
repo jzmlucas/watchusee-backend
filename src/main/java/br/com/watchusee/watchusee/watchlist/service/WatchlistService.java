@@ -1,5 +1,6 @@
 package br.com.watchusee.watchusee.watchlist.service;
 
+import br.com.watchusee.watchusee.friend.repository.FriendshipRepository;
 import br.com.watchusee.watchusee.movie.domain.Movie;
 import br.com.watchusee.watchusee.movie.repository.MovieRepository;
 import br.com.watchusee.watchusee.movie.service.MovieService;
@@ -11,6 +12,7 @@ import br.com.watchusee.watchusee.watchlist.domain.WatchlistStatus;
 import br.com.watchusee.watchusee.watchlist.repository.WatchlistRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,17 +23,20 @@ public class WatchlistService {
     private final UserRepository userRepository;
     private final MovieRepository movieRepository;
     private final MovieService movieService;
+    private final FriendshipRepository friendshipRepository;
 
     public WatchlistService(
             WatchlistRepository watchlistRepository,
             UserRepository userRepository,
             MovieRepository movieRepository,
-            MovieService movieService
+            MovieService movieService,
+            FriendshipRepository friendshipRepository
     ) {
         this.watchlistRepository = watchlistRepository;
         this.userRepository = userRepository;
         this.movieRepository = movieRepository;
         this.movieService = movieService;
+        this.friendshipRepository = friendshipRepository;
     }
 
     @Transactional
@@ -125,6 +130,52 @@ public class WatchlistService {
 
         return watchlistRepository.findAllByUserIdAndStatus(
                 userId,
+                status,
+                pageable
+        );
+    }
+
+    /**
+     * Lista a watchlist de um usuário a partir da perspectiva de outro
+     * usuário (visualização de perfil de terceiros).
+     *
+     * Só é permitido quando:
+     *   - o visualizador é o próprio dono da watchlist; ou
+     *   - o visualizador e o dono são amigos (amizade ACEITA).
+     *
+     * Isso impede que qualquer usuário autenticado veja a biblioteca
+     * privada de outro usuário apenas manipulando o ID na URL (IDOR).
+     */
+    @Transactional(readOnly = true)
+    public Page<Watchlist> findAllForViewer(
+            Long viewerId,
+            Long targetUserId,
+            WatchlistStatus status,
+            Pageable pageable
+    ) {
+
+        findUser(targetUserId);
+
+        boolean isSelf =
+                viewerId.equals(targetUserId);
+
+        boolean areFriends =
+                !isSelf &&
+                        friendshipRepository
+                                .existsAcceptedFriendshipBetween(
+                                        viewerId,
+                                        targetUserId
+                                );
+
+        if (!isSelf && !areFriends) {
+
+            throw new AccessDeniedException(
+                    "Você só pode visualizar a watchlist de amigos."
+            );
+        }
+
+        return findAll(
+                targetUserId,
                 status,
                 pageable
         );

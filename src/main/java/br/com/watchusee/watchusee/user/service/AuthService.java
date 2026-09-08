@@ -49,16 +49,13 @@ public class AuthService {
     @Transactional
     public LoginResponse login(LoginRequest request) {
 
-        String normalizedNick =
-                normalizeNick(request.nick());
+        String normalizedNick = normalizeNick(request.nick());
 
-        User user =
-                userRepository
-                        .findByNick(normalizedNick)
-                        .orElse(null);
+        User user = userRepository
+                .findByNick(normalizedNick)
+                .orElse(null);
 
         if (user == null) {
-
             passwordEncoder.matches(
                     request.password(),
                     DUMMY_PASSWORD_HASH
@@ -77,7 +74,6 @@ public class AuthService {
         Instant now = Instant.now();
 
         if (user.isLocked(now)) {
-
             log.warn(
                     "Tentativa de login em conta bloqueada. userId={}",
                     user.getId()
@@ -89,14 +85,12 @@ public class AuthService {
             );
         }
 
-        boolean passwordMatches =
-                passwordEncoder.matches(
-                        request.password(),
-                        user.getPasswordHash()
-                );
+        boolean passwordMatches = passwordEncoder.matches(
+                request.password(),
+                user.getPasswordHash()
+        );
 
         if (!passwordMatches) {
-
             user.registerFailedLoginAttempt(
                     maxFailedAttempts,
                     Duration.ofMinutes(lockDurationMinutes),
@@ -117,14 +111,17 @@ public class AuthService {
         }
 
         user.resetFailedLoginAttempts();
+
         userRepository.save(user);
 
-        String token =
-                jwtService.generateToken(
-                        user.getId()
-                );
+        String token = jwtService.generateToken(
+                user.getId()
+        );
 
-        log.info("Login realizado com sucesso. userId={}", user.getId());
+        log.info(
+                "Login realizado com sucesso. userId={}",
+                user.getId()
+        );
 
         return new LoginResponse(
                 user.getId(),
@@ -136,17 +133,14 @@ public class AuthService {
     private String normalizeNick(String nick) {
 
         if (nick == null) {
-
             throw new InvalidCredentialsException(
                     "Nick ou senha inválidos."
             );
         }
 
-        String normalizedNick =
-                nick.trim();
+        String normalizedNick = nick.trim();
 
         if (normalizedNick.isBlank()) {
-
             throw new InvalidCredentialsException(
                     "Nick ou senha inválidos."
             );

@@ -73,11 +73,6 @@ public class SecurityConfig {
 
                                 .requestMatchers(
                                         HttpMethod.POST,
-                                        "/api/v1/auth/logout"
-                                ).authenticated()
-
-                                .requestMatchers(
-                                        HttpMethod.POST,
                                         "/api/v1/users"
                                 ).permitAll()
 
@@ -96,39 +91,24 @@ public class SecurityConfig {
                                         "/actuator/health"
                                 ).permitAll()
 
-
                                 .requestMatchers(
-                                        HttpMethod.GET,
-                                        "/api/v1/users/search"
+                                        HttpMethod.POST,
+                                        "/api/v1/auth/logout"
                                 ).authenticated()
 
                                 .requestMatchers(
-                                        HttpMethod.GET,
-                                        "/api/v1/users/*/profile"
+                                        "/api/v1/users/**"
                                 ).authenticated()
 
                                 .requestMatchers(
-                                        HttpMethod.PUT,
-                                        "/api/v1/users/me/password"
+                                        "/api/v1/friends/**"
                                 ).authenticated()
 
                                 .requestMatchers(
-                                        HttpMethod.GET,
-                                        "/api/v1/watchlist"
+                                        "/api/v1/shares/**"
                                 ).authenticated()
 
                                 .requestMatchers(
-                                        HttpMethod.GET,
-                                        "/api/v1/watchlist/**"
-                                ).authenticated()
-
-                                .requestMatchers(
-                                        HttpMethod.PUT,
-                                        "/api/v1/watchlist/**"
-                                ).authenticated()
-
-                                .requestMatchers(
-                                        HttpMethod.DELETE,
                                         "/api/v1/watchlist/**"
                                 ).authenticated()
 

@@ -47,7 +47,14 @@ public class UserWatchlistController {
 
     @GetMapping
     @Operation(
-            summary = "Visualizar a watchlist de um usuário"
+            summary = "Visualizar a watchlist de um usuário",
+            description = """
+                    Retorna a watchlist do usuário informado.
+
+                    Por privacidade, só é permitido visualizar a própria
+                    watchlist ou a de um usuário com quem exista amizade
+                    aceita. Caso contrário, é retornado 403 Forbidden.
+                    """
     )
     public ResponseEntity<PageResponse<WatchlistResponse>> findUserWatchlist(
 
@@ -91,7 +98,8 @@ public class UserWatchlistController {
 
         Page<WatchlistResponse> result =
                 watchlistService
-                        .findAll(
+                        .findAllForViewer(
+                                authenticatedUserId,
                                 userId,
                                 status,
                                 pageable
