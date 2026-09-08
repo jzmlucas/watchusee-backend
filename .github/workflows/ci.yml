@@ -1,6 +1,6 @@
 name: CI
 
-# Define os triggers que acionam a execução do workflow
+# Define os triggers que acionam a execução do workflow.
 on:
   push:
     branches:
