@@ -1,0 +1,90 @@
+name: CD
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  deploy:
+    name: Deploy para produção
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Identificar versão
+        run: |
+          echo "Commit: $GITHUB_SHA"
+          echo "Branch: $GITHUB_REF_NAME"
+          echo "Autor: $GITHUB_ACTOR"
+
+      - name: Iniciar deploy no Render
+        run: |
+          echo "Iniciando deploy no Render..."
+
+          curl --fail-with-body \
+            --request POST \
+            "${{ secrets.RENDER_DEPLOY_HOOK }}"
+
+          echo "Deploy solicitado com sucesso."
+
+      - name: Aguardar inicialização
+        run: |
+          echo "Aguardando o Render iniciar a aplicação..."
+          sleep 30
+
+      - name: Verificar saúde da aplicação
+        env:
+          API_URL: ${{ secrets.PRODUCTION_URL }}
+        run: |
+          echo "Verificando aplicação em:"
+          echo "$API_URL"
+
+          MAX_ATTEMPTS=20
+
+          SLEEP_SECONDS=15
+
+          for attempt in $(seq 1 $MAX_ATTEMPTS); do
+
+            echo "Health check $attempt/$MAX_ATTEMPTS..."
+
+            if curl \
+              --fail \
+              --silent \
+              --show-error \
+              "$API_URL/actuator/health"
+            then
+
+              echo ""
+              echo "=========================================="
+              echo "Deploy realizado com sucesso!"
+              echo "Aplicação está saudável."
+              echo "=========================================="
+
+              exit 0
+
+            fi
+
+            echo "Aplicação ainda não está pronta."
+
+            sleep $SLEEP_SECONDS
+
+          done
+
+          echo "=========================================="
+          echo "ERRO: aplicação não ficou saudável."
+          echo "=========================================="
+
+          exit 1
