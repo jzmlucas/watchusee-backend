@@ -1,22 +1,30 @@
 name: CI
 
+# Define os triggers que acionam a execução do workflow
 on:
   push:
     branches:
       - main
-
   pull_request:
     branches:
       - main
 
+# Define as permissões de acesso necessárias para o token do GitHub Actions
 permissions:
   contents: read
 
+# Controla a concorrência para cancelar execuções antigas redundantes na mesma branch/PR
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Define os jobs que serão executados no pipeline
 jobs:
   build-and-test:
     name: Build & Testes
     runs-on: ubuntu-latest
-
+    
+    # Configuração de serviços necessários para os testes
     services:
       postgres:
         image: postgres:16
@@ -28,44 +36,47 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d watchusee"
-          --health-interval 10s
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
+    # Variáveis de ambiente globais disponibilizadas para o job
     env:
-      # Banco PostgreSQL temporário
       SUPABASE_URL: jdbc:postgresql://localhost:5432/watchusee
       SUPABASE_USERNAME: postgres
       SUPABASE_PASSWORD: postgres
-
-      # Chave exclusiva para os testes do CI.
       JWT_SECRET: e98235465b3759ae58a0684b95ccd85916982160522466c50285036d08bc19ab
-
       TMDB_API_KEY: ci-test-key
 
+    # Sequência de setps executados em ordem dentro do job
     steps:
+      # Passo para baixar o código-fonte do repositório
       - name: Checkout do código
         uses: actions/checkout@v4
 
+      # Passo para instalar e configurar a versão correta do Java
       - name: Configurar JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
-          distribution: 'temurin'
+          java-version: "21"
+          distribution: temurin
           cache: maven
 
-      - name: Verificar versão do Java
-        run: java -version
-
-      - name: Verificar versão do Maven
-        run: ./mvnw -version
-
+      # Passo para garantir permissão de execução no wrapper do Maven
       - name: Tornar mvnw executável
         run: chmod +x mvnw
 
+      # Passo para conferir as versões do Java e do Maven ativas no ambiente
+      - name: Verificar ambiente
+        run: |
+          java -version
+          ./mvnw -version
+
+      # Passo principal que compila o projeto e executa todos os testes unitários e de integração
       - name: Build e testes
         run: ./mvnw -B clean verify
 
+      # Salvar os relatórios de testes como artefatos do GitHub
       - name: Publicar relatórios de testes
         if: always()
         uses: actions/upload-artifact@v4
@@ -77,6 +88,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # Salvar o arquivo gerado caso o build seja bem-sucedido
       - name: Publicar artefato da aplicação
         if: success()
         uses: actions/upload-artifact@v4
