@@ -39,7 +39,7 @@ jobs:
       SUPABASE_PASSWORD: postgres
 
       # Chave exclusiva para os testes do CI.
-      JWT_SECRET: ci-test-secret-watchusee-2026
+      JWT_SECRET: e98235465b3759ae58a0684b95ccd85916982160522466c50285036d08bc19ab
 
       TMDB_API_KEY: ci-test-key
 
