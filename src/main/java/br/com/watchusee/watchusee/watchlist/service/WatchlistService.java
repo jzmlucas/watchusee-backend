@@ -135,17 +135,6 @@ public class WatchlistService {
         );
     }
 
-    /**
-     * Lista a watchlist de um usuário a partir da perspectiva de outro
-     * usuário (visualização de perfil de terceiros).
-     *
-     * Só é permitido quando:
-     *   - o visualizador é o próprio dono da watchlist; ou
-     *   - o visualizador e o dono são amigos (amizade ACEITA).
-     *
-     * Isso impede que qualquer usuário autenticado veja a biblioteca
-     * privada de outro usuário apenas manipulando o ID na URL (IDOR).
-     */
     @Transactional(readOnly = true)
     public Page<Watchlist> findAllForViewer(
             Long viewerId,

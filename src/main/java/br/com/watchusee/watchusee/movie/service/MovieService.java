@@ -1,9 +1,6 @@
 package br.com.watchusee.watchusee.movie.service;
 
-import br.com.watchusee.watchusee.movie.api.dto.MovieListItemResponse;
-import br.com.watchusee.watchusee.movie.api.dto.MovieListResponse;
-import br.com.watchusee.watchusee.movie.api.dto.MovieReviewItemResponse;
-import br.com.watchusee.watchusee.movie.api.dto.MovieReviewsResponse;
+import br.com.watchusee.watchusee.movie.api.dto.*;
 import br.com.watchusee.watchusee.movie.client.tmdb.TmdbClient;
 import br.com.watchusee.watchusee.movie.client.tmdb.dto.TmdbListsResponse;
 import br.com.watchusee.watchusee.movie.client.tmdb.dto.TmdbMovieResponse;
@@ -13,8 +10,10 @@ import br.com.watchusee.watchusee.movie.client.tmdb.dto.TmdbVideosResponse;
 import br.com.watchusee.watchusee.movie.domain.Movie;
 import br.com.watchusee.watchusee.movie.dto.MoviePageResult;
 import br.com.watchusee.watchusee.movie.dto.MovieTrailerResponse;
+import br.com.watchusee.watchusee.movie.mapper.MovieDetailsMapper;
 import br.com.watchusee.watchusee.movie.mapper.MovieMapper;
 import org.springframework.stereotype.Service;
+import br.com.watchusee.watchusee.movie.api.dto.MovieDetailsResponse;
 
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
@@ -24,13 +23,16 @@ public class MovieService {
 
     private final TmdbClient tmdbClient;
     private final MovieMapper movieMapper;
+    private final MovieDetailsMapper movieDetailsMapper;
 
     public MovieService(
             TmdbClient tmdbClient,
-            MovieMapper movieMapper
+            MovieMapper movieMapper,
+            MovieDetailsMapper movieDetailsMapper
     ) {
         this.tmdbClient = tmdbClient;
         this.movieMapper = movieMapper;
+        this.movieDetailsMapper = movieDetailsMapper;
     }
 
     public List<Movie> searchMovies(String query) {
@@ -57,6 +59,21 @@ public class MovieService {
         }
 
         return movieMapper.toDomain(response);
+    }
+
+    public MovieDetailsResponse getMovieDetails(Long movieId) {
+
+        validateMovieId(movieId);
+
+        TmdbMovieResponse response = tmdbClient.getMovie(movieId);
+
+        if (response == null) {
+            throw new IllegalStateException(
+                    "O TMDB retornou uma resposta vazia para o filme."
+            );
+        }
+
+        return movieDetailsMapper.toResponse(response);
     }
 
     public Movie getRandomTrendingMovie() {
