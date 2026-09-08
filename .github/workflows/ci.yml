@@ -17,6 +17,32 @@ jobs:
     name: Build & Testes
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+
+        env:
+          POSTGRES_DB: watchusee
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+
+        ports:
+          - 5432:5432
+
+        options: >-
+          --health-cmd "pg_isready -U postgres -d watchusee"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # Banco de dados exclusivo do CI.
+    # Essas variáveis sobrescrevem as configurações
+    # esperadas pela aplicação durante os testes.
+    env:
+      SUPABASE_URL: jdbc:postgresql://localhost:5432/watchusee
+      SUPABASE_USERNAME: postgres
+      SUPABASE_PASSWORD: postgres
+
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
@@ -25,11 +51,17 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: '21'
-          distribution: 'temurin'
+          distribution: temurin
           cache: maven
 
-      - name: Tornar mvnw executável
+      - name: Tornar Maven Wrapper executável
         run: chmod +x mvnw
+
+      - name: Verificar versão do Java
+        run: java -version
+
+      - name: Verificar versão do Maven
+        run: ./mvnw --version
 
       - name: Build e testes
         run: ./mvnw -B clean verify
