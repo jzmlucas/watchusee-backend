@@ -20,7 +20,7 @@
 * [Como executar](#como-executar)
 * [Swagger / OpenAPI](#swagger--openapi)
 * [Testes](#testes)
-* [Decisões arquiteturais (inferidas do código)](#decisões-arquiteturais-inferidas-do-código)
+* [Decisões arquiteturais](#decisões-arquiteturais-inferidas-do-código)
 * [Melhorias futuras](#melhorias-futuras)
 * [Tecnologias utilizadas](#tecnologias-utilizadas)
 * [Autor](#autor)
@@ -598,11 +598,133 @@ docker run -p 8080:8080 \
 
 O `Dockerfile` é multi-stage: build com `maven:3.9-eclipse-temurin-21`, runtime com `eclipse-temurin:21-jre-alpine`, limite de heap `-Xmx800m`, porta configurável via `${PORT}`.
 
-### Testes
+## Testes
+
+### Execução
 
 ```bash
 ./mvnw clean test
 ```
+
+### Estrutura de Testes
+
+O projeto utiliza **JUnit 5** com extensões do Spring Boot e Mockito. A cobertura é feita com **Mockito**, enquanto testes reais usam **H2 Database**.
+
+---
+
+#### **Unit Tests (Services)**
+
+Localização: `src/test/java/br/com/watchusee/watchusee/*/service/*Test.java`
+
+**Características:**
+- Isolados com Mockito para dependências (repositories, clients, mappers)
+- Testam regras de negócio e validações de domínio
+- Uso extensivo de `@Nested` para organização por métodos/fluxos
+- Asserts claras com `AssertJ`
+
+| Serviço | Arquivo | Categorias de Testes |
+|---------|---------|---------------------|
+| **AuthService** | `AuthServiceTest.java` | Login, Logout, Troca de Senha, Bloqueio de Conta, Validação de Credenciais |
+| **UserService** | `UserServiceTest.java` | CRUD de Usuários, Busca, Permissões |
+| **UserProfileService** | `UserProfileServiceTest.java` | Atualização de Avatar, Filme Favorito |
+| **WatchlistService** | `WatchlistServiceTest.java` | Adicionar/Remover Filmes, Paginação, Filtros por Status |
+| **FriendService** | `FriendServiceTest.java` | Enviar Solicitação, Aceitar/Recusar, Listagem de Amigos, Auto-solicitação bloqueada |
+| **ShareService** | `ShareServiceTest.java` | Compartilhar Filmes, Receber Compartilhamentos, Expiração |
+| **MovieService** | `MovieServiceTest.java` | Busca, Popular, Tendências, Validação de IDs, Tratamento de Nulls |
+
+---
+
+#### **Security Tests (Token e Blacklist)**
+
+Localização: `src/test/java/br/com/watchusee/watchusee/shared/security/*Test.java`
+
+| Serviço | Arquivo | Testes Principais |
+|---------|---------|-------------------|
+| **JwtService** | `JwtServiceTest.java` | Geração, Validação, Expiração, Assinatura |
+| **InMemoryTokenBlacklistService** | `InMemoryTokenBlacklistServiceTest.java` | Adicionar Revogação, Verificação de Blacklist, Tempo de Visto |
+
+---
+
+#### **Application Tests (Sistema Completo)**
+
+Localização: `src/test/java/br/com/watchusee/watchusee/WatchuseeApplicationTests.java`
+
+**O que cobre:**
+- Boot da aplicação Spring Boot
+- Configuração básica de dependências
+- Verificação de portas e inicialização do servidor web
+
+---
+
+####⃣ **Possíveis Testes de Integração (Futuro)**
+
+Para expansão, podem-se adicionar:
+
+- **Controller Tests:** Testar endpoints `/api/v1/*` com `WebMvcTest` + `MockMvc`
+- **Repository Tests:** Validar consultas JPA/Hibernate diretamente no banco (H2)
+- **Integration Tests:** Usar `@SpringBootTest` para testar fluxos completos
+- **Security Tests Integration:** Testar filtros de autenticação e autorização com contexto real
+- **Load/Performance Tests:** Usar `Gatling`, `JMeter` ou `Micrometer Observability`
+
+---
+
+### Dependências de Teste (`pom.xml`)
+
+
+```xml
+<dependencies>
+    <!-- Spring Boot Starter Test (inclui JUnit 5, AssertJ, Mockito) -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+
+    <!-- H2 Database para testes de unidade com persistência -->
+    <dependency>
+        <groupId>com.h2database</groupId>
+        <artifactId>h2</artifactId>
+        <scope>test</scope>
+    </dependency>
+
+    <!-- MockWebServer para simular TMDB em testes -->
+    <dependency>
+        <groupId>com.squareup.okhttp3</groupId>
+        <artifactId>mockwebserver</artifactId>
+        <version>4.12.0</version>
+        <scope>test</scope>
+    </dependency>
+
+    <!-- Starters de teste específicos -->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-webmvc-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-validation-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-cache-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+</dependencies>
+```
+
+---
+
+### Melhores Práticas Atuais
+
+1. **Descrições claras com `@DisplayName`**: Todo teste tem uma descrição em português do que verifica.
+2. **Organização com `@Nested`**: Grupos de testes por fluxo/método para evitar repetição.
+3. **Mocking estratégico**: Apenas o necessário é mockado; persistência real ocorre quando relevante.
+4. **Assertions semânticas**: Usar `assertThat()` + `is()`, `isEmpty()`, `containsExactly()` etc.
+5. **Verificação de interações**: Usar `verify(mock)` para garantir que repositórios/mocks foram chamados como esperado.
 
 ---
 
@@ -612,7 +734,7 @@ O `Dockerfile` é multi-stage: build com `maven:3.9-eclipse-temurin-21`, runtime
 
 ---
 
-## Decisões arquiteturais (inferidas do código)
+## Decisões arquiteturais
 
 - **Package-by-feature em vez de package-by-layer**: cada módulo de negócio carrega sua própria pilha completa (domain/repository/service/controller/dto), o que localiza mudanças mas também faz módulos se acoplarem diretamente uns aos outros via injeção direta de repository/service de outro pacote (ex.: `WatchlistService` conhece `MovieRepository` e `MovieService`; `UserProfileService` conhece `FriendshipRepository` e `WatchlistRepository`).
 - **JWT stateless sem papéis**: não há modelagem de `Role`/`Authority`, a única distinção de identidade é "autenticado" vs. "não autenticado", e autorização por dono do recurso é feita manualmente em cada service.
@@ -635,7 +757,7 @@ O `Dockerfile` é multi-stage: build com `maven:3.9-eclipse-temurin-21`, runtime
 ## Tecnologias utilizadas
 
 [![Java 21](https://img.shields.io/badge/Java-21-orange?style=for-the-badge&logo=openjdk)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.8-brightgreen?style=for-the-badge&logo=springboot)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen?style=for-the-badge&logo=springboot)](https://spring.io/projects/spring-boot)
 [![Spring Security](https://img.shields.io/badge/Spring%20Security-brightgreen?style=for-the-badge&logo=springsecurity)](https://spring.io/projects/spring-security)
 [![Spring Data JPA](https://img.shields.io/badge/Spring%20Data%20JPA-Hibernate-brightgreen?style=for-the-badge&logo=spring)](https://spring.io/projects/spring-data-jpa)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-336791?style=for-the-badge&logo=postgresql)](https://www.postgresql.org/)

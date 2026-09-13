@@ -11,6 +11,8 @@ import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import org.mockito.Mockito;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,6 +35,7 @@ class JwtServiceTest {
                 VALID_SECRET,
                 EXPIRATION_MS,
                 "watchusee-api",
+                "watchusee-api",
                 tokenBlacklistService
         );
     }
@@ -53,7 +56,7 @@ class JwtServiceTest {
 
         String token = jwtService.generateToken(1L);
 
-        when(tokenBlacklistService.isRevoked(org.mockito.ArgumentMatchers.anyString()))
+        when(tokenBlacklistService.isRevoked(any(String.class)))
                 .thenReturn(false);
 
         assertThat(jwtService.isValid(token)).isTrue();
@@ -65,7 +68,7 @@ class JwtServiceTest {
 
         String token = jwtService.generateToken(1L);
 
-        when(tokenBlacklistService.isRevoked(org.mockito.ArgumentMatchers.anyString()))
+        when(tokenBlacklistService.isRevoked(any(String.class)))
                 .thenReturn(true);
 
         assertThat(jwtService.isValid(token)).isFalse();
@@ -86,6 +89,7 @@ class JwtServiceTest {
                 "outra-chave-completamente-diferente-000",
                 EXPIRATION_MS,
                 "watchusee-api",
+                "watchusee-api",
                 tokenBlacklistService
         );
 
@@ -102,20 +106,20 @@ class JwtServiceTest {
 
         jwtService.revoke(token);
 
-        org.mockito.Mockito.verify(tokenBlacklistService)
+        Mockito.verify(tokenBlacklistService)
                 .revoke(
-                        org.mockito.ArgumentMatchers.anyString(),
-                        org.mockito.ArgumentMatchers.any(Instant.class)
+                        any(String.class),
+                        any(Instant.class)
                 );
     }
 
     @Test
-    @DisplayName("não deve lançar exceção ao tentar revogar um token inválido")
+    @DisplayName("não deve lançar exceão ao tentar revogar um token inválido")
     void shouldNotThrowWhenRevokingInvalidToken() {
 
         jwtService.revoke("token-totalmente-invalido");
 
-        org.mockito.Mockito.verifyNoInteractions(tokenBlacklistService);
+        Mockito.verifyNoInteractions(tokenBlacklistService);
     }
 
     @Test
@@ -126,6 +130,7 @@ class JwtServiceTest {
                 new JwtService(
                         "chave-curta",
                         EXPIRATION_MS,
+                        "watchusee-api",
                         "watchusee-api",
                         tokenBlacklistService
                 )

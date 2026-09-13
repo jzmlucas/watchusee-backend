@@ -54,4 +54,14 @@ buildNumber.properties
 .env
 .env.*
 
+.gradle/
+.npm/
+node_modules/
+.mvn/wrapper/maven-wrapper.jar  # Remova o comentário!
+.coverage/
+jacoco/
+
+README.md
+docs/
+
 README.md

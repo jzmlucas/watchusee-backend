@@ -309,8 +309,14 @@ public class TmdbClientImpl implements TmdbClient {
             return restClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/3/movie/{movieId}/videos")
-                            .queryParam("api_key", tmdbProperties.apiKey())
-                            .queryParam("language", "pt-BR")
+                            .queryParam(
+                                    "api_key",
+                                    tmdbProperties.apiKey()
+                            )
+                            .queryParam(
+                                    "language",
+                                    tmdbProperties.language()
+                            )
                             .build(movieId))
                     .retrieve()
                     .body(TmdbVideosResponse.class);

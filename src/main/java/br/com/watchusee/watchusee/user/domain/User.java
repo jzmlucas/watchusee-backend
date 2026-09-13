@@ -15,6 +15,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 
 @Entity
 @Table(name = "users")
@@ -63,7 +65,6 @@ public class User {
     @Column(
             name = "failed_login_attempts",
             nullable = false,
-
             columnDefinition = "integer DEFAULT 0"
     )
     private int failedLoginAttempts = 0;
@@ -84,6 +85,9 @@ public class User {
         this.nick = nick;
         this.passwordHash = passwordHash;
         this.createdAt = Instant.now();
+    }
+
+    public User(Long userId, String mail, String nickname, List<Object> of, List<Object> of1, Instant now) {
     }
 
     public Long getId() {
@@ -110,8 +114,31 @@ public class User {
         return favoriteMovie;
     }
 
+    public int getFailedLoginAttempts() {
+        return failedLoginAttempts;
+    }
+
+    public Instant getLockedUntil() {
+        return lockedUntil;
+    }
+
+    public Instant getTokensValidAfter() {
+        return tokensValidAfter;
+    }
+
     public void changePassword(String passwordHash) {
+
+        if (passwordHash == null || passwordHash.isBlank()) {
+            throw new IllegalArgumentException(
+                    "O hash da senha não pode ser nulo ou vazio."
+            );
+        }
+
         this.passwordHash = passwordHash;
+
+        this.tokensValidAfter =
+                Instant.now()
+                        .truncatedTo(ChronoUnit.SECONDS);
     }
 
     public void updateAvatarIcon(AvatarIcon avatarIcon) {
@@ -140,16 +167,10 @@ public class User {
         this.favoriteMovie = null;
     }
 
-    public int getFailedLoginAttempts() {
-        return failedLoginAttempts;
-    }
-
-    public Instant getLockedUntil() {
-        return lockedUntil;
-    }
-
     public boolean isLocked(Instant now) {
-        return lockedUntil != null && lockedUntil.isAfter(now);
+
+        return lockedUntil != null &&
+                lockedUntil.isAfter(now);
     }
 
     public void registerFailedLoginAttempt(
@@ -157,6 +178,7 @@ public class User {
             java.time.Duration lockDuration,
             Instant now
     ) {
+
         this.failedLoginAttempts++;
 
         if (this.failedLoginAttempts >= maxAttempts) {
@@ -165,21 +187,30 @@ public class User {
     }
 
     public void resetFailedLoginAttempts() {
+
         this.failedLoginAttempts = 0;
         this.lockedUntil = null;
     }
 
-    public Instant getTokensValidAfter() {
-        return tokensValidAfter;
-    }
-
     public void invalidateTokensIssuedBefore(Instant instant) {
-        this.tokensValidAfter = instant;
+
+        if (instant == null) {
+            throw new IllegalArgumentException(
+                    "O instante de invalidação não pode ser nulo."
+            );
+        }
+
+        this.tokensValidAfter =
+                instant.truncatedTo(ChronoUnit.SECONDS);
     }
 
     public boolean isTokenValid(Instant issuedAt) {
 
-        if (tokensValidAfter == null || issuedAt == null) {
+        if (issuedAt == null) {
+            return false;
+        }
+
+        if (tokensValidAfter == null) {
             return true;
         }
 

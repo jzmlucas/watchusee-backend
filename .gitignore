@@ -2,11 +2,15 @@
 # SEGREDOS, CREDENCIAIS E CONFIGURAÇÕES LOCAIS
 # ==========================================
 
-# Variáveis de ambiente
 .env
 .env.*
 !.env.example
 !.env.template
+
+# Configurações locais do Spring
+application-local.yml
+application-local.yaml
+application-local.properties
 
 # Chaves privadas e certificados
 *.pem
@@ -17,14 +21,19 @@
 *.jks
 *.keystore
 *.p8
+
 id_rsa
 id_rsa.*
 id_ed25519
 id_ed25519.*
 
-# Credenciais de cloud
+# ==========================================
+# CREDENCIAIS DE CLOUD
+# ==========================================
+
 .aws/
 .kube/
+
 gcp-key.json
 cloud-key.json
 *-credentials.json
@@ -38,10 +47,13 @@ target/
 build/
 out/
 bin/
+
 .gradle/
 
-# Arquivos gerados pelo Maven
 *.class
+
+# Maven
+.mvn/timing.properties
 
 # ==========================================
 # LOGS / RUNTIME
@@ -64,6 +76,7 @@ log/
 *.iml
 *.iws
 *.ipr
+out/
 
 # Eclipse / STS
 .classpath
@@ -91,6 +104,7 @@ nbdist/
 .DS_Store
 .DS_Store?
 ._*
+
 .Spotlight-V100
 .Trashes
 
@@ -106,12 +120,28 @@ desktop.ini
 *.db
 *.sqlite
 *.sqlite3
+
 *.dump
+*.sql
 *.sqldump
 
-# Dumps SQL locais
 *.sql.bak
 *.sql.tmp
+
+# ==========================================
+# DOCKER / AMBIENTE LOCAL
+# ==========================================
+
+docker-compose.local.yml
+docker-compose.dev.local.yml
+
+# ==========================================
+# TESTES / COBERTURA
+# ==========================================
+
+coverage/
+jacoco/
+*.exec
 
 # ==========================================
 # TEMPORÁRIOS

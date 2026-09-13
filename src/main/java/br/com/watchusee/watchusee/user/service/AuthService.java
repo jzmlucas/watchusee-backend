@@ -7,8 +7,10 @@ import br.com.watchusee.watchusee.user.domain.User;
 import br.com.watchusee.watchusee.user.exception.AccountLockedException;
 import br.com.watchusee.watchusee.user.exception.InvalidCredentialsException;
 import br.com.watchusee.watchusee.user.repository.UserRepository;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -23,9 +25,6 @@ public class AuthService {
     private static final Logger log =
             LoggerFactory.getLogger(AuthService.class);
 
-    private static final String DUMMY_PASSWORD_HASH =
-            "{bcrypt}$2a$10$7EqJtq98hPqEX7fNZaFWoOhi5a2Vc9nvVGKp/pWMBP0e9J9v5PoOe";
-
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
@@ -35,6 +34,9 @@ public class AuthService {
 
     @Value("${security.login.lock-duration-minutes:15}")
     private long lockDurationMinutes;
+
+    @Value("${security.login.dummy-password-hash}")
+    private String dummyPasswordHash;
 
     public AuthService(
             UserRepository userRepository,
@@ -49,16 +51,18 @@ public class AuthService {
     @Transactional
     public LoginResponse login(LoginRequest request) {
 
-        String normalizedNick = normalizeNick(request.nick());
+        String normalizedNick =
+                normalizeNick(request.nick());
 
         User user = userRepository
                 .findByNick(normalizedNick)
                 .orElse(null);
 
         if (user == null) {
+
             passwordEncoder.matches(
                     request.password(),
-                    DUMMY_PASSWORD_HASH
+                    dummyPasswordHash
             );
 
             log.warn(
@@ -74,6 +78,7 @@ public class AuthService {
         Instant now = Instant.now();
 
         if (user.isLocked(now)) {
+
             log.warn(
                     "Tentativa de login em conta bloqueada. userId={}",
                     user.getId()
@@ -85,12 +90,14 @@ public class AuthService {
             );
         }
 
-        boolean passwordMatches = passwordEncoder.matches(
-                request.password(),
-                user.getPasswordHash()
-        );
+        boolean passwordMatches =
+                passwordEncoder.matches(
+                        request.password(),
+                        user.getPasswordHash()
+                );
 
         if (!passwordMatches) {
+
             user.registerFailedLoginAttempt(
                     maxFailedAttempts,
                     Duration.ofMinutes(lockDurationMinutes),
@@ -114,9 +121,8 @@ public class AuthService {
 
         userRepository.save(user);
 
-        String token = jwtService.generateToken(
-                user.getId()
-        );
+        String token =
+                jwtService.generateToken(user.getId());
 
         log.info(
                 "Login realizado com sucesso. userId={}",
@@ -138,7 +144,8 @@ public class AuthService {
             );
         }
 
-        String normalizedNick = nick.trim();
+        String normalizedNick =
+                nick.trim();
 
         if (normalizedNick.isBlank()) {
             throw new InvalidCredentialsException(

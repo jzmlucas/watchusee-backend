@@ -19,18 +19,44 @@ public class InMemoryTokenBlacklistService implements TokenBlacklistService {
             return;
         }
 
-        revokedTokens.put(jti, expiresAt != null ? expiresAt : Instant.now());
+        Instant revokedUntil =
+                expiresAt != null
+                        ? expiresAt
+                        : Instant.now();
+
+        if (!revokedUntil.isAfter(Instant.now())) {
+            return;
+        }
+
+        revokedTokens.put(jti, revokedUntil);
+
         cleanupExpired();
     }
 
     @Override
     public boolean isRevoked(String jti) {
 
-        if (jti == null) {
+        if (jti == null || jti.isBlank()) {
             return false;
         }
 
-        return revokedTokens.containsKey(jti);
+        Instant revokedUntil =
+                revokedTokens.get(jti);
+
+        if (revokedUntil == null) {
+            return false;
+        }
+
+        Instant now = Instant.now();
+
+        if (!revokedUntil.isAfter(now)) {
+
+            revokedTokens.remove(jti, revokedUntil);
+
+            return false;
+        }
+
+        return true;
     }
 
     private void cleanupExpired() {
@@ -38,6 +64,8 @@ public class InMemoryTokenBlacklistService implements TokenBlacklistService {
         Instant now = Instant.now();
 
         revokedTokens.entrySet()
-                .removeIf(entry -> entry.getValue().isBefore(now));
+                .removeIf(entry ->
+                        !entry.getValue().isAfter(now)
+                );
     }
 }

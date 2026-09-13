@@ -59,17 +59,9 @@ class AuthServiceTest {
                 jwtService
         );
 
-        ReflectionTestUtils.setField(
-                authService,
-                "maxFailedAttempts",
-                MAX_ATTEMPTS
-        );
-
-        ReflectionTestUtils.setField(
-                authService,
-                "lockDurationMinutes",
-                LOCK_DURATION_MINUTES
-        );
+        ReflectionTestUtils.setField(authService, "maxFailedAttempts", MAX_ATTEMPTS);
+        ReflectionTestUtils.setField(authService, "lockDurationMinutes", LOCK_DURATION_MINUTES);
+        ReflectionTestUtils.setField(authService, "dummyPasswordHash", DUMMY_PASSWORD_HASH);
     }
 
     private User buildUser(

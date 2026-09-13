@@ -22,57 +22,51 @@ public class JwtService {
             LoggerFactory.getLogger(JwtService.class);
 
     private static final String DEFAULT_ISSUER = "watchusee-api";
+    private static final String DEFAULT_AUDIENCE = "watchusee-api";
 
     private final SecretKey secretKey;
     private final long expirationMillis;
     private final String issuer;
+    private final String audience;
     private final TokenBlacklistService tokenBlacklistService;
 
     public JwtService(
             @Value("${security.jwt.secret}") String secret,
             @Value("${security.jwt.expiration-ms:86400000}") long expirationMillis,
             @Value("${security.jwt.issuer:" + DEFAULT_ISSUER + "}") String issuer,
+            @Value("${security.jwt.audience:" + DEFAULT_AUDIENCE + "}") String audience,
             TokenBlacklistService tokenBlacklistService
     ) {
 
-        if (secret == null || secret.length() < 32) {
-            throw new IllegalArgumentException(
-                    "A chave JWT deve possuir pelo menos 32 caracteres."
-            );
-        }
-
-        this.secretKey =
-                Keys.hmacShaKeyFor(
-                        secret.getBytes(StandardCharsets.UTF_8)
-                );
-
+        this.secretKey = createSecretKey(secret);
         this.expirationMillis = expirationMillis;
         this.issuer = issuer;
+        this.audience = audience;
         this.tokenBlacklistService = tokenBlacklistService;
     }
 
     public String generateToken(Long userId) {
 
         Instant now = Instant.now();
-
-        Instant expiration =
-                now.plusMillis(expirationMillis);
+        Instant expiration = now.plusMillis(expirationMillis);
 
         return Jwts.builder()
                 .id(UUID.randomUUID().toString())
                 .issuer(issuer)
                 .subject(String.valueOf(userId))
+                .audience()
+                .add(audience)
+                .and()
                 .issuedAt(Date.from(now))
                 .notBefore(Date.from(now))
                 .expiration(Date.from(expiration))
-                .signWith(secretKey)
+                .signWith(secretKey, Jwts.SIG.HS256)
                 .compact();
     }
 
     public Long extractUserId(String token) {
 
-        Claims claims =
-                parseClaims(token);
+        Claims claims = parseClaims(token);
 
         return Long.valueOf(
                 claims.getSubject()
@@ -81,28 +75,32 @@ public class JwtService {
 
     public Instant extractIssuedAt(String token) {
 
-        Claims claims =
-                parseClaims(token);
+        Claims claims = parseClaims(token);
 
         Date issuedAt = claims.getIssuedAt();
 
-        return issuedAt != null ? issuedAt.toInstant() : null;
+        return issuedAt != null
+                ? issuedAt.toInstant()
+                : null;
     }
 
     public boolean isValid(String token) {
 
         try {
 
-            Claims claims =
-                    parseClaims(token);
+            Claims claims = parseClaims(token);
 
-            if (tokenBlacklistService.isRevoked(claims.getId())) {
-                return false;
-            }
+            String tokenId = claims.getId();
 
-            return true;
+            return tokenId != null
+                    && !tokenBlacklistService.isRevoked(tokenId);
 
         } catch (JwtException | IllegalArgumentException exception) {
+
+            log.debug(
+                    "Token JWT inválido: {}",
+                    exception.getMessage()
+            );
 
             return false;
         }
@@ -114,26 +112,59 @@ public class JwtService {
 
             Claims claims = parseClaims(token);
 
+            String tokenId = claims.getId();
+            Date expiration = claims.getExpiration();
+
+            if (tokenId == null) {
+                return;
+            }
+
+            Instant expiresAt = expiration != null
+                    ? expiration.toInstant()
+                    : Instant.now();
+
             tokenBlacklistService.revoke(
-                    claims.getId(),
-                    claims.getExpiration() != null
-                            ? claims.getExpiration().toInstant()
-                            : Instant.now()
+                    tokenId,
+                    expiresAt
             );
 
         } catch (JwtException | IllegalArgumentException exception) {
 
-            log.debug("Tentativa de revogar um token inválido.");
+            log.debug(
+                    "Tentativa de revogar um token JWT inválido: {}",
+                    exception.getMessage()
+            );
         }
     }
 
     private Claims parseClaims(String token) {
 
         return Jwts.parser()
-                .requireIssuer(issuer)
                 .verifyWith(secretKey)
+                .requireIssuer(issuer)
+                .requireAudience(audience)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+    }
+
+    private SecretKey createSecretKey(String secret) {
+
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalArgumentException(
+                    "A chave JWT não pode ser nula ou vazia."
+            );
+        }
+
+        byte[] keyBytes =
+                secret.getBytes(StandardCharsets.UTF_8);
+
+        if (keyBytes.length < 32) {
+            throw new IllegalArgumentException(
+                    "A chave JWT deve possuir pelo menos 32 bytes."
+            );
+        }
+
+        return Keys.hmacShaKeyFor(keyBytes);
     }
 }

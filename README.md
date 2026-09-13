@@ -3,7 +3,7 @@
 ## Tecnologias
 
 [![Java 21](https://img.shields.io/badge/Java-21-orange?style=for-the-badge&logo=openjdk)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0.8-brightgreen?style=for-the-badge&logo=springboot)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1.1-brightgreen?style=for-the-badge&logo=springboot)](https://spring.io/projects/spring-boot)
 [![Spring Security](https://img.shields.io/badge/Spring%20Security-brightgreen?style=for-the-badge&logo=springsecurity)](https://spring.io/projects/spring-security)
 [![Spring Data JPA](https://img.shields.io/badge/Spring%20Data%20JPA-Hibernate-brightgreen?style=for-the-badge&logo=spring)](https://spring.io/projects/spring-data-jpa)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-336791?style=for-the-badge&logo=postgresql)](https://www.postgresql.org/)
@@ -48,7 +48,7 @@ A API mantém o contrato do TMDB isolado do cliente através de DTOs e mapeadore
 - Compartilhamento de filmes entre usuários.
 - Rate limiting para autenticação e endpoints públicos de filmes.
 - Tratamento global e consistente de erros.
-- OpenAPI/Swagger.
+- OpenAPI/Swagger *(exposto em produção - desabilitar para segurança)*.
 
 ##  Arquitetura
 
@@ -186,6 +186,10 @@ Ela contém:
 - decisões arquiteturais;
 - problemas encontrados;
 - melhorias futuras.
+
+## Notas de Segurança
+
+⚠️ A documentação OpenAPI está disponível em `/swagger-ui/index.html`.
 
 ## Testes
 

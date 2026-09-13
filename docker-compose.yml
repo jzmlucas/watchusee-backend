@@ -1,0 +1,64 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: watchusee-backend
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      JAVA_TOOL_OPTIONS: "-Djava.security.egd=file:/dev/./urandom"
+      TMDB_API_KEY: ${TMDB_API_KEY}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_USERNAME: ${SUPABASE_USERNAME}
+      SUPABASE_PASSWORD: ${SUPABASE_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - watchusee-network
+
+  db:
+    image: postgres:16-alpine
+    container_name: watchusee-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - watchusee-network
+
+  tmdb-mock:
+    image: mockserver/mockserver:5.15.2
+    container_name: watchusee-tmdb-mock
+    environment:
+      MOCKSERVER_SERVER_PORT: 1080
+    ports:
+      - "1080:1080"
+    networks:
+      - watchusee-network
+
+volumes:
+  postgres_data:
+
+networks:
+  watchusee-network:
+    driver: bridge
