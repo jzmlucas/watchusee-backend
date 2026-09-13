@@ -1,6 +1,5 @@
 package br.com.watchusee.watchusee.user.service;
 
-import br.com.watchusee.watchusee.friend.domain.FriendshipStatus;
 import br.com.watchusee.watchusee.friend.repository.FriendshipRepository;
 import br.com.watchusee.watchusee.user.api.dto.FavoriteMovieResponse;
 import br.com.watchusee.watchusee.user.api.dto.UserProfileResponse;
@@ -54,17 +53,7 @@ public class UserProfileService {
                 );
 
         long friendsCount =
-                friendshipRepository
-                        .countByRequesterIdAndStatus(
-                                userId,
-                                FriendshipStatus.ACCEPTED
-                        )
-                        +
-                        friendshipRepository
-                                .countByReceiverIdAndStatus(
-                                        userId,
-                                        FriendshipStatus.ACCEPTED
-                                );
+                friendshipRepository.countAcceptedFriendships(userId);
 
         FavoriteMovieResponse favoriteMovieResponse =
                 user.getFavoriteMovie() == null

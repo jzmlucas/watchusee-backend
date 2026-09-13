@@ -50,6 +50,15 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     @Value("${security.rate-limit.public-api.window-seconds:60}")
     private int publicApiWindowSeconds;
 
+    @Value("${security.rate-limit.friend-request.max-requests:20}")
+    private int friendRequestMaxRequests;
+
+    @Value("${security.rate-limit.friend-request.window-seconds:60}")
+    private int friendRequestWindowSeconds;
+
+    private static final java.util.regex.Pattern SEND_FRIEND_REQUEST_URI =
+            java.util.regex.Pattern.compile("^/api/v1/friends/requests/\\d+$");
+
     @Value("${security.rate-limit.enabled:true}")
     private boolean enabled;
 
@@ -122,6 +131,18 @@ public class RateLimitingFilter extends OncePerRequestFilter {
                     "auth",
                     authMaxRequests,
                     authWindowSeconds
+            );
+        }
+
+        boolean isSendFriendRequestEndpoint =
+                "POST".equalsIgnoreCase(method) &&
+                        SEND_FRIEND_REQUEST_URI.matcher(uri).matches();
+
+        if (isSendFriendRequestEndpoint) {
+            return new RateLimitRule(
+                    "friend-request",
+                    friendRequestMaxRequests,
+                    friendRequestWindowSeconds
             );
         }
 

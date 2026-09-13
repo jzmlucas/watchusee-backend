@@ -1,6 +1,5 @@
 package br.com.watchusee.watchusee.user.service;
 
-import br.com.watchusee.watchusee.friend.domain.FriendshipStatus;
 import br.com.watchusee.watchusee.friend.repository.FriendshipRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -102,9 +101,7 @@ class UserProfileServiceTest {
             when(watchlistRepository.countByUserIdAndStatus(userId, WatchlistStatus.TO_WATCH))
                     .thenReturn(15L);
 
-            when(friendshipRepository.countByRequesterIdAndStatus(userId, FriendshipStatus.ACCEPTED))
-                    .thenReturn(0L);
-            when(friendshipRepository.countByReceiverIdAndStatus(userId, FriendshipStatus.ACCEPTED))
+            when(friendshipRepository.countAcceptedFriendships(userId))
                     .thenReturn(0L);
 
             UserProfileResponse profile = userProfileService.getProfile(userId);
@@ -116,14 +113,10 @@ class UserProfileServiceTest {
         void shouldCalculateFriendsCountCorrectly() {
             when(userRepository.findById(userId)).thenReturn(java.util.Optional.of(createMockUser()));
             
-            long requesterCount = 3L;
-            long receiverCount = 7L;
-            long expectedFriendsCount = requesterCount + receiverCount;
-            
-            when(friendshipRepository.countByRequesterIdAndStatus(userId, FriendshipStatus.ACCEPTED))
-                    .thenReturn(requesterCount);
-            when(friendshipRepository.countByReceiverIdAndStatus(userId, FriendshipStatus.ACCEPTED))
-                    .thenReturn(receiverCount);
+            long expectedFriendsCount = 10L;
+
+            when(friendshipRepository.countAcceptedFriendships(userId))
+                    .thenReturn(expectedFriendsCount);
             
             UserProfileResponse profile = userProfileService.getProfile(userId);
             assertThat(profile.friendsCount()).isEqualTo(expectedFriendsCount);

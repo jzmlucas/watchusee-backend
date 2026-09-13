@@ -1,9 +1,25 @@
 package br.com.watchusee.watchusee.friend.domain;
 
+import br.com.watchusee.watchusee.friend.exception.FriendshipStateConflictException;
 import br.com.watchusee.watchusee.user.domain.User;
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import jakarta.persistence.Version;
 
 import java.time.Instant;
+import java.util.Objects;
 
 @Entity
 @Table(
@@ -11,11 +27,12 @@ import java.time.Instant;
         uniqueConstraints = {
                 @UniqueConstraint(
                         name = "uk_friendship_pair",
-                        columnNames = {
-                                "requester_id",
-                                "receiver_id"
-                        }
+                        columnNames = {"user_min_id", "user_max_id"}
                 )
+        },
+        indexes = {
+                @Index(name = "ix_friendship_receiver_status", columnList = "receiver_id,status"),
+                @Index(name = "ix_friendship_requester_status", columnList = "requester_id,status")
         }
 )
 public class Friendship {
@@ -25,51 +42,114 @@ public class Friendship {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(
-            name = "requester_id",
-            nullable = false
-    )
+    @JoinColumn(name = "requester_id", nullable = false, updatable = false)
     private User requester;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(
-            name = "receiver_id",
-            nullable = false
-    )
+    @JoinColumn(name = "receiver_id", nullable = false, updatable = false)
     private User receiver;
 
+    @Column(name = "user_min_id", nullable = false, updatable = false)
+    private Long userMinId;
+
+    @Column(name = "user_max_id", nullable = false, updatable = false)
+    private Long userMaxId;
+
     @Enumerated(EnumType.STRING)
-    @Column(
-            nullable = false,
-            length = 20
-    )
+    @Column(nullable = false, length = 20)
     private FriendshipStatus status;
 
-    @Column(
-            name = "created_at",
-            nullable = false,
-            updatable = false
-    )
+    @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
-    @Column(
-            name = "updated_at",
-            nullable = false
-    )
+    @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    @Column(name = "responded_at")
+    private Instant respondedAt;
+
+    @Version
+    @Column(nullable = false)
+    private Long version;
 
     protected Friendship() {
     }
 
-    public Friendship(
-            User requester,
-            User receiver
-    ) {
-        this.requester = requester;
-        this.receiver = receiver;
+    private Friendship(User requester, User receiver, Instant now) {
+        this.requester = Objects.requireNonNull(requester, "requester não pode ser nulo.");
+        this.receiver = Objects.requireNonNull(receiver, "receiver não pode ser nulo.");
+
+        if (requester.getId().equals(receiver.getId())) {
+            throw new IllegalArgumentException(
+                    "Não é possível criar uma amizade de um usuário consigo mesmo."
+            );
+        }
+
         this.status = FriendshipStatus.PENDING;
-        this.createdAt = Instant.now();
-        this.updatedAt = Instant.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+        normalizePair();
+    }
+
+    public static Friendship request(User requester, User receiver, Instant now) {
+        return new Friendship(requester, receiver, now);
+    }
+
+    @PrePersist
+    private void normalizePair() {
+
+        long a = requester.getId();
+        long b = receiver.getId();
+        this.userMinId = Math.min(a, b);
+        this.userMaxId = Math.max(a, b);
+    }
+
+    public void accept() {
+        requireTransitionableFrom(FriendshipStatus.PENDING);
+        Instant now = Instant.now();
+        this.status = FriendshipStatus.ACCEPTED;
+        this.respondedAt = now;
+        this.updatedAt = now;
+    }
+
+    public void reject() {
+        requireTransitionableFrom(FriendshipStatus.PENDING);
+        Instant now = Instant.now();
+        this.status = FriendshipStatus.REJECTED;
+        this.respondedAt = now;
+        this.updatedAt = now;
+    }
+
+    public void cancel() {
+        requireTransitionableFrom(FriendshipStatus.PENDING);
+        Instant now = Instant.now();
+        this.status = FriendshipStatus.CANCELLED;
+        this.respondedAt = now;
+        this.updatedAt = now;
+    }
+
+    private void requireTransitionableFrom(FriendshipStatus expected) {
+        if (this.status != expected) {
+            throw new FriendshipStateConflictException(
+                    "Esta solicitação não está mais pendente (status atual: " + this.status + ")."
+            );
+        }
+    }
+
+    public User otherParticipant(Long userId) {
+        if (requester.getId().equals(userId)) {
+            return receiver;
+        }
+        if (receiver.getId().equals(userId)) {
+            return requester;
+        }
+        throw new IllegalArgumentException(
+                "O usuário " + userId + " não participa desta relação."
+        );
+    }
+
+    public boolean involves(Long userId) {
+        return requester.getId().equals(userId) || receiver.getId().equals(userId);
     }
 
     public Long getId() {
@@ -84,6 +164,14 @@ public class Friendship {
         return receiver;
     }
 
+    public Long getUserMinId() {
+        return userMinId;
+    }
+
+    public Long getUserMaxId() {
+        return userMaxId;
+    }
+
     public FriendshipStatus getStatus() {
         return status;
     }
@@ -96,13 +184,11 @@ public class Friendship {
         return updatedAt;
     }
 
-    public void accept() {
-        this.status = FriendshipStatus.ACCEPTED;
-        this.updatedAt = Instant.now();
+    public Instant getRespondedAt() {
+        return respondedAt;
     }
 
-    public void reject() {
-        this.status = FriendshipStatus.REJECTED;
-        this.updatedAt = Instant.now();
+    public Long getVersion() {
+        return version;
     }
 }

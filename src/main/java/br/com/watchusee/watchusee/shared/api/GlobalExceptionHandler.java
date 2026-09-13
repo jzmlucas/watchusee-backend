@@ -1,5 +1,10 @@
 package br.com.watchusee.watchusee.shared.api;
 
+import br.com.watchusee.watchusee.friend.exception.FriendshipActionNotAllowedException;
+import br.com.watchusee.watchusee.friend.exception.FriendshipAlreadyExistsException;
+import br.com.watchusee.watchusee.friend.exception.FriendshipNotFoundException;
+import br.com.watchusee.watchusee.friend.exception.FriendshipStateConflictException;
+import br.com.watchusee.watchusee.friend.exception.SelfFriendRequestException;
 import br.com.watchusee.watchusee.movie.client.tmdb.exception.TmdbException;
 import br.com.watchusee.watchusee.movie.client.tmdb.exception.TmdbMovieNotFoundException;
 import br.com.watchusee.watchusee.share.exception.ShareRecipientNotFoundException;
@@ -183,6 +188,84 @@ public class GlobalExceptionHandler {
         return buildResponse(
                 HttpStatus.NOT_FOUND,
                 exception.getMessage(),
+                request
+        );
+    }
+
+    @ExceptionHandler(FriendshipNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleFriendshipNotFound(
+            FriendshipNotFoundException exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.NOT_FOUND,
+                exception.getMessage(),
+                request
+        );
+    }
+
+    @ExceptionHandler(SelfFriendRequestException.class)
+    public ResponseEntity<ErrorResponse> handleSelfFriendRequest(
+            SelfFriendRequestException exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.BAD_REQUEST,
+                exception.getMessage(),
+                request
+        );
+    }
+
+    @ExceptionHandler(FriendshipAlreadyExistsException.class)
+    public ResponseEntity<ErrorResponse> handleFriendshipAlreadyExists(
+            FriendshipAlreadyExistsException exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                request
+        );
+    }
+
+    @ExceptionHandler(FriendshipStateConflictException.class)
+    public ResponseEntity<ErrorResponse> handleFriendshipStateConflict(
+            FriendshipStateConflictException exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                request
+        );
+    }
+
+    @ExceptionHandler(FriendshipActionNotAllowedException.class)
+    public ResponseEntity<ErrorResponse> handleFriendshipActionNotAllowed(
+            FriendshipActionNotAllowedException exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.FORBIDDEN,
+                exception.getMessage(),
+                request
+        );
+    }
+
+    @ExceptionHandler(org.springframework.orm.ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleOptimisticLockingFailure(
+            org.springframework.orm.ObjectOptimisticLockingFailureException exception,
+            HttpServletRequest request
+    ) {
+
+        return buildResponse(
+                HttpStatus.CONFLICT,
+                "Este recurso foi modificado por outra requisição simultânea. Tente novamente.",
                 request
         );
     }

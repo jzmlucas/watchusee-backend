@@ -2,70 +2,93 @@ package br.com.watchusee.watchusee.friend.repository;
 
 import br.com.watchusee.watchusee.friend.domain.Friendship;
 import br.com.watchusee.watchusee.friend.domain.FriendshipStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.util.List;
 import java.util.Optional;
 
-public interface FriendshipRepository
-        extends JpaRepository<Friendship, Long> {
+public interface FriendshipRepository extends JpaRepository<Friendship, Long> {
 
-    /**
-     * Verifica se existe uma amizade ACEITA entre dois usuários,
-     * independentemente de quem enviou a solicitação originalmente.
-     *
-     * Usado para controle de acesso: só amigos podem visualizar
-     * dados privados um do outro (ex.: watchlist).
-     */
+    boolean existsByUserMinIdAndUserMaxId(Long userMinId, Long userMaxId);
+
+    boolean existsByUserMinIdAndUserMaxIdAndStatus(
+            Long userMinId,
+            Long userMaxId,
+            FriendshipStatus status
+    );
+
     @Query("""
-            SELECT CASE WHEN COUNT(f) > 0 THEN true ELSE false END
-            FROM Friendship f
-            WHERE f.status = br.com.watchusee.watchusee.friend.domain.FriendshipStatus.ACCEPTED
-              AND (
-                    (f.requester.id = :userIdA AND f.receiver.id = :userIdB)
-                 OR (f.requester.id = :userIdB AND f.receiver.id = :userIdA)
-              )
+            SELECT f FROM Friendship f
+            JOIN FETCH f.requester
+            JOIN FETCH f.receiver
+            WHERE f.userMinId = :userMinId AND f.userMaxId = :userMaxId
             """)
-    boolean existsAcceptedFriendshipBetween(
-            @Param("userIdA") Long userIdA,
-            @Param("userIdB") Long userIdB
+    Optional<Friendship> findByUserPair(
+            @Param("userMinId") Long userMinId,
+            @Param("userMaxId") Long userMaxId
     );
 
-    Optional<Friendship> findByRequesterIdAndReceiverId(
-            Long requesterId,
-            Long receiverId
-    );
+    @Query(
+            value = """
+                    SELECT f FROM Friendship f
+                    JOIN FETCH f.requester
+                    JOIN FETCH f.receiver
+                    WHERE f.status = br.com.watchusee.watchusee.friend.domain.FriendshipStatus.ACCEPTED
+                      AND (f.userMinId = :userId OR f.userMaxId = :userId)
+                    """,
+            countQuery = """
+                    SELECT COUNT(f) FROM Friendship f
+                    WHERE f.status = br.com.watchusee.watchusee.friend.domain.FriendshipStatus.ACCEPTED
+                      AND (f.userMinId = :userId OR f.userMaxId = :userId)
+                    """
+    )
+    Page<Friendship> findAcceptedFriendships(@Param("userId") Long userId, Pageable pageable);
 
-    boolean existsByRequesterIdAndReceiverId(
-            Long requesterId,
-            Long receiverId
-    );
+    @Query(
+            value = """
+                    SELECT f FROM Friendship f
+                    WHERE f.status = br.com.watchusee.watchusee.friend.domain.FriendshipStatus.ACCEPTED
+                      AND (f.userMinId = :userId OR f.userMaxId = :userId)
+                    """
+    )
+    long countAcceptedFriendships(@Param("userId") Long userId);
 
-    long countByRequesterIdAndStatus(
-            Long requesterId,
-            FriendshipStatus status
-    );
+    @Query(
+            value = """
+                    SELECT f FROM Friendship f
+                    JOIN FETCH f.requester
+                    WHERE f.receiver.id = :userId
+                      AND f.status = br.com.watchusee.watchusee.friend.domain.FriendshipStatus.PENDING
+                    """,
+            countQuery = """
+                    SELECT COUNT(f) FROM Friendship f
+                    WHERE f.receiver.id = :userId
+                      AND f.status = br.com.watchusee.watchusee.friend.domain.FriendshipStatus.PENDING
+                    """
+    )
+    Page<Friendship> findReceivedPendingRequests(@Param("userId") Long userId, Pageable pageable);
 
-    long countByReceiverIdAndStatus(
-            Long receiverId,
-            FriendshipStatus status
-    );
+    @Query(
+            value = """
+                    SELECT f FROM Friendship f
+                    JOIN FETCH f.receiver
+                    WHERE f.requester.id = :userId
+                      AND f.status = br.com.watchusee.watchusee.friend.domain.FriendshipStatus.PENDING
+                    """,
+            countQuery = """
+                    SELECT COUNT(f) FROM Friendship f
+                    WHERE f.requester.id = :userId
+                      AND f.status = br.com.watchusee.watchusee.friend.domain.FriendshipStatus.PENDING
+                    """
+    )
+    Page<Friendship> findSentPendingRequests(@Param("userId") Long userId, Pageable pageable);
 
-    List<Friendship> findByReceiverIdAndStatus(
-            Long receiverId,
-            FriendshipStatus status
-    );
-
-    List<Friendship> findByRequesterIdAndStatus(
-            Long requesterId,
-            FriendshipStatus status
-    );
-
-    List<Friendship> findByRequesterIdOrReceiverIdAndStatus(
-            Long requesterId,
-            Long receiverId,
-            FriendshipStatus status
-    );
+    default boolean existsAcceptedFriendshipBetween(Long userIdA, Long userIdB) {
+        long min = Math.min(userIdA, userIdB);
+        long max = Math.max(userIdA, userIdB);
+        return existsByUserMinIdAndUserMaxIdAndStatus(min, max, FriendshipStatus.ACCEPTED);
+    }
 }

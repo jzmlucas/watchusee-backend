@@ -12,5 +12,8 @@ public enum FriendRelationStatus {
 
     REQUEST_RECEIVED,
 
-    REJECTED
+
+    REJECTED,
+
+    CANCELLED
 }
