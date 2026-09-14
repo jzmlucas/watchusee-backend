@@ -35,7 +35,7 @@ public class RestClientConfig {
     public RestClient tmdbRestClient(
             TmdbProperties tmdbProperties,
             IpAllowlistConfig ipAllowlistConfig
-    ) {
+    ) throws Exception {
         
         JdkClientHttpRequestFactory requestFactory = CustomSSLContext.createSecureRequestFactory();
 

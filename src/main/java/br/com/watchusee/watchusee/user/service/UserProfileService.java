@@ -53,16 +53,22 @@ public class UserProfileService {
                 );
 
         long friendsCount =
-                friendshipRepository.countAcceptedFriendships(userId);
+                friendshipRepository.countAcceptedFriendships(
+                        userId
+                );
 
-        FavoriteMovieResponse favoriteMovieResponse =
-                user.getFavoriteMovie() == null
-                        ? null
-                        : new FavoriteMovieResponse(
+        FavoriteMovieResponse favoriteMovieResponse = null;
+        try {
+            if (user.getFavoriteMovie() != null) {
+                favoriteMovieResponse = new FavoriteMovieResponse(
                         user.getFavoriteMovie().getId(),
                         user.getFavoriteMovie().getTitle(),
                         user.getFavoriteMovie().getPosterPath()
                 );
+            }
+        } catch (Exception e) {
+            favoriteMovieResponse = null;
+        }
 
         return new UserProfileResponse(
                 user.getId(),

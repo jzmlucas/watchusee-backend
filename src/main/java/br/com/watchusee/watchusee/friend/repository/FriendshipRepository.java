@@ -49,8 +49,8 @@ public interface FriendshipRepository extends JpaRepository<Friendship, Long> {
 
     @Query(
             value = """
-                    SELECT f FROM Friendship f
-                    WHERE f.status = br.com.watchusee.watchusee.friend.domain.FriendshipStatus.ACCEPTED
+                    SELECT COUNT(f) FROM Friendship f
+                    WHERE f.status = :status
                       AND (f.userMinId = :userId OR f.userMaxId = :userId)
                     """
     )
