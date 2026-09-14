@@ -1,7 +1,12 @@
 # Arquitetura e Documentação Técnica do WatchuSee Backend
 
+Este documento descreve a arquitetura, as regras de negócio e as decisões técnicas do backend do WatchuSee — uma API REST em Spring Boot que combina descoberta de filmes (via TMDB), watchlist pessoal, amizades e compartilhamento de recomendações, com autenticação própria via JWT.
+
+O objetivo é servir como referência técnica precisa: cada afirmação aqui foi verificada contra o código-fonte atual. Onde o comportamento real diverge do que seria "o ideal", isso é sinalizado explicitamente em vez de omitido — inclusive na seção [Débito técnico e bugs conhecidos](#débito-técnico-e-bugs-conhecidos), que consolida tudo que precisa de atenção antes de produção com carga real.
+
 ## Índice
 
+* [Visão geral da arquitetura](#visão-geral-da-arquitetura)
 * [Usuários](#usuários)
 * [Filmes](#filmes)
 * [Watchlist](#watchlist)
@@ -13,19 +18,51 @@
 * [API / Endpoints](#api--endpoints)
 * [Tratamento de erros](#tratamento-de-erros)
 * [Validações](#validações)
-* [Configurações de segurança](#configurações-de-segurança)
 * [Serviços (Services)](#serviços-services)
 * [Repositories](#repositories)
 * [Dependências (`pom.xml`)](#dependências-pomxml)
 * [Configuração](#configuração)
 * [Como executar](#como-executar)
-* [Swagger / OpenAPI](#swagger--openapi)
 * [Testes](#testes)
-* [Decisões arquiteturais](#decisões-arquiteturais-inferidas-do-código)
+* [Swagger / OpenAPI](#swagger--openapi)
+* [Decisões arquiteturais](#decisões-arquiteturais)
+* [Débito técnico e bugs conhecidos](#débito-técnico-e-bugs-conhecidos)
 * [Melhorias futuras](#melhorias-futuras)
 * [Tecnologias utilizadas](#tecnologias-utilizadas)
 * [Autor](#autor)
 
+---
+
+## Visão geral da arquitetura
+
+Layered architecture organizada por **package-by-feature**: cada módulo de negócio (`user`, `movie`, `watchlist`, `friend`, `share`) carrega sua própria pilha completa — `domain` (entidade JPA), `repository`, `service`, controller e DTOs — em vez de pacotes horizontais (`controllers/`, `services/`, `repositories/`). O módulo `shared` concentra o que atravessa todos os outros: segurança (JWT, rate limiting) e o tratamento global de erros.
+
+<details>
+<summary>Ver arquitetura</summary>
+
+```mermaid
+flowchart TD
+    Client["Cliente HTTP"] --> RL["RateLimitingFilter"]
+    RL --> JWT["JwtAuthenticationFilter"]
+    JWT --> Security["SecurityContext"]
+    Security --> Controller["Controllers REST"]
+    Controller --> DTO["DTO + Bean Validation"]
+    DTO --> Service["Services"]
+    Service --> Domain["Entidades JPA"]
+    Domain --> Repository["Spring Data JPA"]
+    Repository --> DB[("PostgreSQL")]
+
+    Service --> TMDBClient["TmdbClient"]
+    TMDBClient --> TMDB[("TMDB API")]
+```
+
+</details>
+
+Ponto de atenção sobre a organização por feature: como cada módulo injeta diretamente repositories/services de outros módulos (`WatchlistService` conhece `MovieRepository`/`MovieService`; `UserService` e `UserProfileService` conhecem `FriendshipRepository`/`WatchlistRepository`), o isolamento é só de pacote, não de acoplamento — não há uma camada de fachada entre módulos. Isso é aceitável na escala atual do projeto, mas é o primeiro lugar a rever se o número de módulos crescer.
+
+Dentro de cada módulo, a nomenclatura dos pacotes internos **não é consistente**: `user`, `friend` e `share` colocam controllers em `<módulo>/controller/`, enquanto `movie` e `watchlist` colocam os controllers direto em `<módulo>/api/`. Da mesma forma, `movie` mantém DTOs tanto em `movie/dto/` quanto em `movie/api/dto/`, sem um critério claro de quando um DTO vai para qual pasta. Ver [Débito técnico](#débito-técnico-e-bugs-conhecidos).
+
+---
 
 ## Usuários
 
@@ -66,7 +103,7 @@ Comportamento relevante (métodos de domínio, não getters/setters anêmicos):
 ```java
 @Entity @Table(name = "movies")
 class Movie {
-    Long id;               // = ID do filme no TMDB
+    Long id;                // = ID do filme no TMDB
     String title;           // not null, length 255
     String overview;        // TEXT
     LocalDate releaseDate;
@@ -75,9 +112,9 @@ class Movie {
 }
 ```
 
-O `id` **não** usa `@GeneratedValue` sendo ele o próprio ID do TMDB, garantindo que a mesma entidade nunca seja duplicada localmente para o mesmo filme.
+O `id` **não** usa `@GeneratedValue`, sendo ele o próprio ID do TMDB — isso garante que a mesma entidade nunca seja duplicada localmente para o mesmo filme.
 
-Toda consulta de filme "ao vivo" (busca, tendências, populares, similares, avaliações etc.) vai direto ao TMDB via `MovieService` → `TmdbClient` → `TmdbClientImpl` (usando `RestClient`) e **não** passa pelo `MovieRepository`. O `MovieRepository` só é usado para persistir localmente um filme na primeira vez que ele entra na watchlist ou vira favorito de alguém (`findOrCreateMovie`, duplicado de forma idêntica em `WatchlistService` e `UserService` — ver pontos de atenção).
+Toda consulta de filme "ao vivo" (busca, tendências, populares, similares, avaliações etc.) vai direto ao TMDB via `MovieService` → `TmdbClient` → `TmdbClientImpl` (usando `RestClient`) e **não** passa pelo `MovieRepository`. O `MovieRepository` só é usado para persistir localmente um filme na primeira vez que ele entra na watchlist ou vira favorito de alguém (`findOrCreateMovie`, implementado de forma quase idêntica em `WatchlistService` e `UserService` — ver [Débito técnico](#débito-técnico-e-bugs-conhecidos)).
 
 ---
 
@@ -89,22 +126,22 @@ Toda consulta de filme "ao vivo" (busca, tendências, populares, similares, aval
 @Entity @Table(name = "watchlist", uniqueConstraints = @UniqueConstraint(columnNames = {"user_id", "movie_id"}))
 class Watchlist {
     Long id;
-    User user;              // @ManyToOne LAZY, not null
-    Movie movie;             // @ManyToOne LAZY, not null
-    WatchlistStatus status;  // TO_WATCH | WATCHED
+    User user;
+    Movie movie;
+    WatchlistStatus status;
     Instant createdAt;
 }
 ```
 
 A constraint única `(user_id, movie_id)` garante no banco que um usuário não pode ter duas entradas para o mesmo filme — daí `updateStatus` funcionar como "criar-ou-atualizar" (upsert manual em `WatchlistService`).
 
-### Endpoints reais
+### Endpoints
 
 | Método | Endpoint | Auth | Descrição |
 |---|---|---|---|
 | `GET` | `/api/v1/watchlist` | 🔒 | Lista a watchlist do usuário autenticado. Query params: `status` (opcional, `TO_WATCH`/`WATCHED`), `page` (padrão `0`), `size` (padrão `20`, máx. `100`). Ordenado por `createdAt` desc. |
 | `GET` | `/api/v1/watchlist/{movieId}` | 🔒 | Consulta um filme específico na própria watchlist. |
-| `PUT` | `/api/v1/watchlist/{movieId}` | 🔒 | Cria ou atualiza o status do filme (`{"status": "TO_WATCH"}` ou `"WATCHED"}`). |
+| `PUT` | `/api/v1/watchlist/{movieId}` | 🔒 | Cria ou atualiza o status do filme (`{"status": "TO_WATCH"}` ou `"WATCHED"`). |
 | `DELETE` | `/api/v1/watchlist/{movieId}` | 🔒 | Remove o filme da watchlist. |
 | `GET` | `/api/v1/users/{userId}/watchlist` | 🔒 | Watchlist **de outro usuário**. Não exige amizade, apenas autenticação. |
 
@@ -112,17 +149,15 @@ A constraint única `(user_id, movie_id)` garante no banco que um usuário não 
 
 ## Amigos
 
-Módulo completo (`friend`), **ausente de qualquer README anterior do projeto**, mas totalmente implementado.
-
 ### Entidade `Friendship`
 
 ```java
 @Entity @Table(name = "friendships", uniqueConstraints = @UniqueConstraint(columnNames = {"requester_id", "receiver_id"}))
 class Friendship {
     Long id;
-    User requester;          // @ManyToOne, not null
-    User receiver;           // @ManyToOne, not null
-    FriendshipStatus status; // PENDING | ACCEPTED | REJECTED
+    User requester;
+    User receiver; 
+    FriendshipStatus status; 
     Instant createdAt;
     Instant updatedAt;
 }
@@ -132,7 +167,7 @@ class Friendship {
 
 | Método | Endpoint | Descrição |
 |---|---|---|
-| `POST` | `/api/v1/friends/requests/{userId}` | Envia solicitação de amizade. 204 em sucesso; 409 se já existe pedido entre os dois (em qualquer status — ver ponto de atenção); 400 se `userId` inválido ou for o próprio usuário. |
+| `POST` | `/api/v1/friends/requests/{userId}` | Envia solicitação de amizade. 204 em sucesso; 409 se já existe pedido entre os dois em qualquer status (ver [Débito técnico](#débito-técnico-e-bugs-conhecidos)); 400 se `userId` inválido ou for o próprio usuário. |
 | `GET` | `/api/v1/friends/requests` | Lista solicitações **recebidas** e pendentes. |
 | `POST` | `/api/v1/friends/requests/{requestId}/accept` | Aceita uma solicitação recebida (só o destinatário pode). |
 | `POST` | `/api/v1/friends/requests/{requestId}/reject` | Recusa uma solicitação recebida. |
@@ -140,7 +175,7 @@ class Friendship {
 | `GET` | `/api/v1/friends/count` | Conta amigos. |
 | `GET` | `/api/v1/friends/status/{userId}` | Retorna o relacionamento com outro usuário: `SELF`, `NONE`, `FRIENDS`, `REQUEST_SENT`, `REQUEST_RECEIVED` ou `REJECTED`. |
 
-Todos exigem autenticação (não há regra explícita no `SecurityConfig` para `/api/v1/friends/**`, então caem na regra padrão `anyRequest().authenticated()`).
+Todos exigem autenticação. Não há regra explícita no `SecurityConfig` para `/api/v1/friends/**`, então essas rotas caem na regra padrão `anyRequest().authenticated()`.
 
 ---
 
@@ -152,28 +187,27 @@ Todos exigem autenticação (não há regra explícita no `SecurityConfig` para 
 @Entity @Table(name = "shares", indexes = {idx_share_recipient, idx_share_sender, idx_share_status})
 class Share {
     Long id;
-    User sender;       // @ManyToOne, not null
-    User recipient;    // @ManyToOne, not null
-    Long movieId;       // referência simples ao ID do TMDB, NÃO é @ManyToOne para Movie
-    String message;     // nullable, length 500
-    ShareStatus status; // PENDING | ACCEPTED | REJECTED
+    User sender;
+    User recipient;  
+    Long movieId;    
+    String message; 
+    ShareStatus status;  
     Instant createdAt;
 }
 ```
 
-Note que `Share.movieId` é um `Long` solto, não uma relação JPA para `Movie` — diferente de `Watchlist.movie`, que é `@ManyToOne`. Isso significa que um `Share` pode referenciar um `movieId` que nunca chegou a ser persistido localmente como `Movie` (o que é normal, já que `ShareService` nunca consulta `MovieRepository`/`MovieService`).
+`Share.movieId` é um `Long` solto, não uma relação JPA para `Movie` — diferente de `Watchlist.movie`, que é `@ManyToOne`. Isso significa que um `Share` pode referenciar um `movieId` que nunca foi persistido localmente como `Movie` (comportamento esperado, já que `ShareService` nunca consulta `MovieRepository`/`MovieService`).
 
 ### Endpoints
 
 | Método | Endpoint | Descrição |
 |---|---|---|
-| `POST` | `/api/v1/shares` | Compartilha um filme com outro usuário, por `recipientNick`. 409 (via `IllegalArgumentException` → 400, na prática) se já existe um share `PENDING` idêntico; 404 se o nick não existe (`ShareRecipientNotFoundException`). |
+| `POST` | `/api/v1/shares` | Compartilha um filme com outro usuário, por `recipientNick`. 400 se já existe um share `PENDING` idêntico (via `IllegalArgumentException`); 404 se o nick não existe (`ShareRecipientNotFoundException`). |
 | `GET` | `/api/v1/shares/received` | Todos os shares recebidos (qualquer status). |
 | `GET` | `/api/v1/shares/pending` | Apenas os `PENDING` recebidos. |
 | `GET` | `/api/v1/shares/sent` | Todos os enviados. |
 | `PATCH` | `/api/v1/shares/{shareId}/accept` | Aceita (apenas o destinatário; só se `PENDING`). |
 | `PATCH` | `/api/v1/shares/{shareId}/reject` | Recusa (mesma regra). |
-
 
 ---
 
@@ -182,11 +216,12 @@ Note que `Share.movieId` é um `Long` solto, não uma relação JPA para `Movie`
 ### Visão geral do fluxo
 
 <details>
+<summary>Visão geral do fluxo</summary>
 
 ```mermaid
 flowchart TD
     Login["POST /api/v1/auth/login"] --> Check1{"Conta bloqueada?"}
-    Check1 -->|Sim| Locked["423/erro: AccountLockedException"]
+    Check1 -->|Sim| Locked["423: AccountLockedException"]
     Check1 -->|Não| Check2{"Senha confere?"}
     Check2 -->|Não| Fail["Incrementa failedLoginAttempts<br/>bloqueia após N tentativas<br/>401 InvalidCredentialsException"]
     Check2 -->|Sim| Reset["Reseta contador"] --> Token["JwtService.generateToken(userId)"]
@@ -200,37 +235,122 @@ flowchart TD
     Valid -->|Sim| Ctx["SecurityContext populado com userId"]
     Ctx --> Controller
 ```
-
 </details>
 
-### Componentes
+### Componentes de autenticação e sessão
 
-- **`SecurityConfig`**: `@EnableWebSecurity`, CSRF desabilitado (justificado: API stateless, autenticação via header e não via cookie), sessão `STATELESS`, CORS explícito (origens configuráveis via `security.cors.allowed-origins`), cabeçalhos de segurança (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `HSTS`). Cadeia de filtros: `RateLimitingFilter` → `JwtAuthenticationFilter` → resto da cadeia padrão do Spring Security.
-- **`JwtService`**: usa `io.jsonwebtoken` (JJWT 0.12.6). Gera tokens com `jti` (UUID), `issuer` (`security.jwt.issuer`), `issuedAt`, `notBefore` e `expiration` (`security.jwt.expiration-ms`, padrão 24h). Assinatura HMAC (`Keys.hmacShaKeyFor`) a partir de `security.jwt.secret` (exige ao menos 32 caracteres, checado no construtor). `isValid()` também consulta `TokenBlacklistService.isRevoked(jti)`.
-- **`TokenBlacklistService`** (interface) / **`InMemoryTokenBlacklistService`**: usada pelo `POST /auth/logout` para revogar um token antes de sua expiração natural. **Em memória, por instância** — não sobrevive a reinício e não é compartilhada entre réplicas.
-- **`TokenValidityService`** (interface) / **`UserTokenValidityService`**: verifica, a cada requisição autenticada, se o `issuedAt` do token é anterior ao `tokensValidAfter` do usuário (setado ao trocar senha). Isso implica **uma consulta ao banco por requisição autenticada** (custo de performance documentado no próprio código).
-- **`JwtAuthenticationFilter`**: extrai o header `Authorization`, valida o token, checa blacklist e `tokensValidAfter`, e só então popula o `SecurityContextHolder`. Falhas não lançam exceção HTTP diretamente — o filtro apenas deixa de autenticar, e a decisão de bloquear (401/403) fica a cargo de `authorizeHttpRequests` mais adiante na cadeia.
-- **`AuthenticatedUser`**: helper usado por todos os controllers para obter o `userId` do usuário logado a partir do `SecurityContextHolder` — lança `IllegalStateException` se não houver autenticação (o que, por sua vez, é capturado como 409 pelo `GlobalExceptionHandler`, não como 401 — ver pontos de atenção).
-- **`PasswordEncoderConfig`**: `PasswordEncoderFactories.createDelegatingPasswordEncoder()` — delega para bcrypt por padrão (padrão do Spring Security), com suporte a múltiplos algoritmos via prefixo `{bcrypt}`, `{noop}` etc. já embutido no hash salvo.
-- **`RateLimitingFilter`**: sliding-window simples em memória, por IP (via `X-Forwarded-For` ou `getRemoteAddr()`), aplicado a `/auth/login`, `POST /users`, `PUT /users/me/password` (bucket "auth", padrão 10 req/min) e `GET /movies/**` (bucket "public-api", padrão 60 req/min). Retorna `429` com header `Retry-After`. **Limitação documentada no próprio código**: por IP e em memória, contorná-vel com múltiplos IPs; não compartilhado entre réplicas.
+- **`SecurityConfig`**: `@EnableWebSecurity`, CSRF desabilitado (justificado: API stateless, autenticação via header e não via cookie), sessão `STATELESS`, cabeçalhos de segurança (`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `HSTS`). Cadeia de filtros: `RateLimitingFilter` → `JwtAuthenticationFilter` → resto da cadeia padrão do Spring Security.
+- **`JwtService`**: usa `io.jsonwebtoken` (JJWT 0.12.6). Gera tokens com `jti` (UUID), `issuer` (`security.jwt.issuer`), `issuedAt`, `notBefore` e `expiration` (`security.jwt.expiration-ms`, padrão 24h). Assinatura HMAC (`Keys.hmacShaKeyFor`) a partir de `security.jwt.secret`, que precisa ter ao menos 32 caracteres (validado no construtor, lançando exceção no boot se for menor). `isValid()` também consulta `TokenBlacklistService.isRevoked(jti)`.
+- **`TokenBlacklistService`** (interface) / **`InMemoryTokenBlacklistService`**: usada por `POST /auth/logout` para revogar um token antes de sua expiração natural. **Em memória, por instância** — não sobrevive a reinício e não é compartilhada entre réplicas.
+- **`TokenValidityService`** (interface) / **`UserTokenValidityService`**: verifica, a cada requisição autenticada, se o `issuedAt` do token é anterior ao `tokensValidAfter` do usuário (setado ao trocar a senha). Isso implica **uma consulta ao banco por requisição autenticada** — custo de performance aceito conscientemente em troca de poder invalidar sessões antigas ao trocar senha.
+- **`JwtAuthenticationFilter`**: extrai o header `Authorization`, valida o token, checa a blacklist e o `tokensValidAfter`, e só então popula o `SecurityContextHolder`. Falhas não lançam exceção HTTP diretamente — o filtro apenas deixa de autenticar, e a decisão de bloquear (401/403) fica a cargo de `authorizeHttpRequests` mais adiante na cadeia.
+- **`AuthenticatedUser`**: helper usado por todos os controllers para obter o `userId` do usuário logado a partir do `SecurityContextHolder` — lança `IllegalStateException` se não houver autenticação, o que é capturado como **409** pelo `GlobalExceptionHandler` (status semanticamente incorreto para esse caso; ver [Débito técnico](#débito-técnico-e-bugs-conhecidos)).
+- **`PasswordEncoderConfig`**: `PasswordEncoderFactories.createDelegatingPasswordEncoder()` — delega para BCrypt por padrão, com suporte a múltiplos algoritmos via prefixo (`{bcrypt}`, `{noop}` etc.) já embutido no hash salvo, o que permite migrar de algoritmo sem reescrever senhas existentes manualmente.
+- **`RateLimitingFilter`**: sliding-window simples em memória, por IP (via `X-Forwarded-For` ou `getRemoteAddr()`), aplicado a `/auth/login`, `POST /users`, `PUT /users/me/password` (bucket "auth", padrão 10 req/min) e `GET /movies/**` (bucket "public-api", padrão 60 req/min). Retorna `429` com header `Retry-After`. Limitação assumida: por IP e em memória — contornável com múltiplos IPs, e não compartilhado entre réplicas.
 - **Bloqueio de conta**: `AuthService` bloqueia a conta por `security.login.lock-duration-minutes` (padrão 15 min) após `security.login.max-attempts` (padrão 5) tentativas de login inválidas seguidas.
-- **Mitigação de enumeração de usuários**: ao tentar logar com um nick inexistente, `AuthService` executa `passwordEncoder.matches()` contra um hash fixo (`DUMMY_PASSWORD_HASH`) só para igualar o tempo de resposta ao caso de "senha incorreta" — evita que um atacante descubra nicks existentes medindo latência.
+- **Mitigação de enumeração de usuários**: ao tentar logar com um nick inexistente, `AuthService` executa `passwordEncoder.matches()` contra um hash fixo (`security.login.dummy-password-hash`, via `DUMMY_PASSWORD_HASH`) só para igualar o tempo de resposta ao caso de "senha incorreta" — evita que um atacante descubra nicks existentes medindo latência.
+
+### Autorização — como o sistema impede acesso a dados de outros usuários
+
+Não há um mecanismo de autorização declarativo (nenhum `@PreAuthorize`) — a checagem é feita **manualmente, dentro de cada service**, comparando o `userId` autenticado com o dono do recurso:
+
+- `ShareService.acceptShare/rejectShare`: usa `shareRepository.findByIdAndRecipientId(shareId, userId)` — se o share não pertence ao usuário, o `findBy` simplesmente não encontra nada, retornando 404, não 403.
+- `FriendService.acceptRequest/rejectRequest`: busca por ID e depois compara `friendship.getReceiver().getId().equals(userId)` manualmente, lançando `IllegalStateException` (→ 409) se não bater — semanticamente deveria ser 403.
+- `WatchlistController`/`UserWatchlistController`: o `userId` da própria watchlist vem sempre de `AuthenticatedUser.getId()`, nunca de parâmetro do cliente — mas a watchlist de **outro** usuário é intencionalmente pública para qualquer autenticado (não há checagem de amizade).
 
 ### Endpoints públicos vs. protegidos
 
 Definidos explicitamente em `SecurityConfig` (o resto cai em `anyRequest().authenticated()`):
 
 - **Públicos**: `POST /api/v1/auth/login`, `POST /api/v1/users` (cadastro), `GET /api/v1/movies/**`, `/swagger-ui/**`, `/v3/api-docs/**`, `/actuator/health`.
-- **Explicitamente autenticados** (redundante com o `anyRequest()`, mas declarado): `POST /api/v1/auth/logout`, `GET /api/v1/users/search`, `GET /api/v1/users/*/profile`, `PUT /api/v1/users/me/password`, todos os métodos de `/api/v1/watchlist/**`.
+- **Explicitamente autenticados** (redundante com o `anyRequest()`, mas declarado por clareza): `POST /api/v1/auth/logout`, `GET /api/v1/users/search`, `GET /api/v1/users/*/profile`, `PUT /api/v1/users/me/password`, todos os métodos de `/api/v1/watchlist/**`.
 - **Autenticados por recair no `anyRequest()`** (sem regra própria, mas exigem login na prática): `/api/v1/friends/**`, `/api/v1/shares/**`, `/api/v1/users/{userId}/watchlist`, `/api/v1/users/avatar-icons`, `/api/v1/users/me/avatar`, `/api/v1/users/me/favorite-movie`.
 
-### Como o sistema impede acesso a dados de outros usuários
+### CORS
 
-Não há um mecanismo de autorização declarativo (nenhum `@PreAuthorize`) — a checagem é feita **manualmente, dentro de cada service**, comparando o `userId` autenticado com o dono do recurso:
+Configurado diretamente em `SecurityConfig`, via `CorsConfigurationSource`:
 
-- `ShareService.acceptShare/rejectShare`: usa `shareRepository.findByIdAndRecipientId(shareId, userId)` — se o share não pertence ao usuário, o `findBy` simplesmente não encontra nada, retornando 400/404, não 403.
-- `FriendService.acceptRequest/rejectRequest`: busca por ID e depois compara `friendship.getReceiver().getId().equals(userId)` manualmente, lançando `IllegalStateException` se não bater.
-- `WatchlistController`/`UserWatchlistController`: o `userId` da própria watchlist vem sempre de `AuthenticatedUser.getId()`, nunca de parâmetro do cliente — mas a watchlist de **outro** usuário é intencionalmente pública para qualquer autenticado (não há checagem de amizade).
+```java
+private CorsConfigurationSource corsConfigurationSource() {
+    CorsConfiguration configuration = new CorsConfiguration();
+    configuration.setAllowedOrigins(allowedOrigins); // security.cors.allowed-origins
+    configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+    configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+    configuration.setExposedHeaders(List.of("Retry-After"));
+    configuration.setAllowCredentials(false);
+    configuration.setMaxAge(3600L);
+
+    UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+    source.registerCorsConfiguration("/**", configuration);
+    return source;
+}
+```
+
+`allowedOrigins` vem de `@Value("${security.cors.allowed-origins:http://localhost:3000,http://localhost:5173}")` — uma lista separada por vírgulas, configurável via `application.properties` sem precisar de uma classe de propriedades dedicada. Não há credenciais (cookies) habilitadas via CORS, o que é coerente com autenticação via header `Authorization`. Em produção, recomenda-se restringir `security.cors.allowed-origins` apenas ao domínio real do frontend.
+
+### Mitigação de SSRF na integração com o TMDB
+
+Como a aplicação faz chamadas HTTP para um host externo configurável (TMDB), há três camadas de defesa contra SSRF, todas implementadas em `config/`:
+
+**1. Whitelist de hosts (`TmdbProperties` + `IpAllowlistConfig`)**
+
+```java
+@Validated
+@ConfigurationProperties(prefix = "tmdb")
+public record TmdbProperties(
+        @NotBlank String baseUrl,
+        @NotBlank String apiKey,
+        @NotBlank String language,
+        Duration connectTimeout,
+        Duration readTimeout,
+        @Min(0) int maxRetries,
+        Duration retryInitialDelay,
+        Duration retryMaxDelay,
+        Set<String> allowedHosts
+) {}
+```
+
+`IpAllowlistConfig` extrai o host de cada URL de requisição (`java.net.URI`) e compara, case-insensitive, contra `tmdb.allowed-hosts`. Se a lista vier vazia, o bean falha no startup (`IllegalStateException`) — a aplicação não sobe com allowlist desabilitada por omissão.
+
+**2. Bloqueio no interceptor do `RestClient` (`RestClientConfig`)**
+
+A checagem de allowlist acontece a **cada tentativa de requisição**, dentro do mesmo `requestInterceptor` que implementa o retry:
+
+```java
+private ClientHttpResponse executeWithAllowlistCheckAndRetry(...) throws IOException {
+    int attempt = 0;
+    while (true) {
+        String host = IpAllowlistConfig.extractHostFromUrl(request.getURI().toString());
+        if (!allowlistConfig.isAllowed(host)) {
+            throw new SecurityException("SSRF Mitigation: Access denied to host: " + host);
+        }
+    }
+}
+```
+
+O backoff é exponencial (`initialDelay * 2^tentativa`, limitado a `retryMaxDelay`), e a lista de status retryable é `429` e qualquer `5xx`.
+
+**3. Validação de certificado TLS (`CustomSSLContext`)**
+
+```java
+private static final Set<String> BLOCKED_HOSTPATTERNS =
+        Set.of("localhost", "127.0.0.1", "::1");
+
+private static class SecureTrustManager implements X509TrustManager {
+    @Override
+    public void checkServerTrusted(X509Certificate[] certs, String authType) throws CertificateException {
+        for (X509Certificate cert : certs) {
+            if (!isTrustedByPublicCA(cert)) {
+                throw new CertificateException("SSRF: Auto-signed certificate rejected!");
+            }
+        }
+    }
+}
+```
+
+Certificados autoassinados são rejeitados mesmo que o host esteja na allowlist — proteção adicional contra um MITM que tentasse se passar pelo TMDB.
+
+**Débito nessa área** (detalhado também em [Débito técnico](#débito-técnico-e-bugs-conhecidos)): `tmdb.connect-timeout` e `tmdb.read-timeout` existem em `TmdbProperties` e em `application.properties`, mas **não são aplicados em lugar nenhum** — o `JdkClientHttpRequestFactory` criado por `CustomSSLContext.createSecureRequestFactory()` não recebe esses valores. Na prática, o `RestClient` do TMDB usa os timeouts padrão da JDK (sem limite superior configurado explicitamente).
 
 ---
 
@@ -298,7 +418,6 @@ erDiagram
         timestamp created_at
     }
 ```
-
 </details>
 
 Constraints únicas relevantes: `(user_id, movie_id)` em `watchlist`; `(requester_id, receiver_id)` em `friendships`. Índices explícitos em `shares`: `recipient_id`, `sender_id`, `status`.
@@ -313,7 +432,7 @@ HTTP → Controller (valida DTO) → Service (regra de negócio) → Repository 
 
 ## Integração externa com TMDB
 
-Único serviço externo integrado. Configuração via `@ConfigurationProperties(prefix = "tmdb")` (`TmdbProperties`: `baseUrl`, `apiKey`, `language`) e um `RestClient` (`RestClientConfig`) com `baseUrl` fixo.
+Único serviço externo integrado. Configuração via `@ConfigurationProperties(prefix = "tmdb")` (`TmdbProperties`) e um `RestClient` (`RestClientConfig`) com `baseUrl` fixo, allowlist de host e retry com backoff exponencial (detalhes em [Mitigação de SSRF](#mitigação-de-ssrf-na-integração-com-o-tmdb)).
 
 `TmdbClientImpl` implementa `TmdbClient` chamando os seguintes endpoints do TMDB v3 (autenticação via `api_key` como query param, não header):
 
@@ -332,7 +451,7 @@ HTTP → Controller (valida DTO) → Service (regra de negócio) → Repository 
 | `getMovieLists` | `GET /3/movie/{id}/lists` |
 | `getMovieVideos` | `GET /3/movie/{id}/videos` |
 
-Tratamento de erro: qualquer `RestClientException` genérica vira `TmdbException` (mapeada para `502 Bad Gateway`); um 404 específico em `getMovie` vira `TmdbMovieNotFoundException` (mapeada para `404`). Não há timeout customizado configurado no `RestClient` (usa o padrão do cliente HTTP subjacente) nem retry/circuit breaker.
+Tratamento de erro: qualquer `RestClientException` genérica vira `TmdbException` (mapeada para `502 Bad Gateway`); um 404 específico em `getMovie` vira `TmdbMovieNotFoundException` (mapeada para `404`).
 
 **Bugs encontrados na integração:**
 - `getUpcomingMovies(int page)` **não envia o parâmetro `page` na requisição ao TMDB** (o `.queryParam("page", page)` está ausente nesse método específico, presente em todos os outros). Na prática, `GET /api/v1/movies/upcoming?page=2` sempre retorna a página 1 do TMDB.
@@ -342,73 +461,73 @@ Tratamento de erro: qualquer `RestClientException` genérica vira `TmdbException
 
 ## API / Endpoints
 
-Prefixo comum: `/api/v1`. = requer `Authorization: Bearer <token>`.
+Prefixo comum: `/api/v1`. 🔒 = requer `Authorization: Bearer <token>`.
 
 ### Autenticação
 | Método | Endpoint | Descrição |
 |---|---|---|
 | POST | `/auth/login` | Login, retorna `{id, nick, token}`. |
-| POST | `/auth/logout` |  Revoga o token atual. |
+| POST | `/auth/logout` 🔒 | Revoga o token atual. |
 
 ### Usuários
 | Método | Endpoint | Descrição |
 |---|---|---|
 | POST | `/users` | Cadastro. |
-| GET | `/users/search?query=` |  Busca por nick (máx. 20 resultados, exclui o próprio usuário). |
-| PUT | `/users/me/password` |  Troca de senha (invalida sessões antigas). |
-| GET | `/users/avatar-icons` |  Lista os ícones de avatar disponíveis. |
-| PUT | `/users/me/avatar` |  Define o ícone de avatar. |
-| PUT | `/users/me/favorite-movie` |  Define o filme favorito (busca/persiste do TMDB se necessário). |
-| DELETE | `/users/me/favorite-movie` |  Remove o filme favorito. |
-| GET | `/users/me/profile` |  Perfil do usuário autenticado. |
-| GET | `/users/{userId}/profile` |  Perfil público de outro usuário. |
+| GET | `/users/search?query=` 🔒 | Busca por nick (máx. 20 resultados, exclui o próprio usuário). |
+| PUT | `/users/me/password` 🔒 | Troca de senha (invalida sessões antigas). |
+| GET | `/users/avatar-icons` 🔒 | Lista os ícones de avatar disponíveis. |
+| PUT | `/users/me/avatar` 🔒 | Define o ícone de avatar. |
+| PUT | `/users/me/favorite-movie` 🔒 | Define o filme favorito (busca/persiste do TMDB se necessário). |
+| DELETE | `/users/me/favorite-movie` 🔒 | Remove o filme favorito. |
+| GET | `/users/me/profile` 🔒 | Perfil do usuário autenticado. |
+| GET | `/users/{userId}/profile` 🔒 | Perfil público de outro usuário. |
 
 ### Filmes (todos públicos)
-| Método | Endpoint | Parâmetros                                |
-|---|---|-------------------------------------------|
-| GET | `/movies/search` | `query` (2–100 chars)                     |
-| GET | `/movies/{movieId}` | —                                         |
-| GET | `/movies/{movieId}/trailer` | 204 se não houver trailer                 |
-| GET | `/movies/{movieId}/similar` | `page` (1–1000)                           |
-| GET | `/movies/{movieId}/recommendations` | `page`                                    |
-| GET | `/movies/{movieId}/reviews` | `page`                                    |
-| GET | `/movies/{movieId}/lists` | `page`                                    |
-| GET | `/movies/trending/week` | —                                         |
-| GET | `/movies/trending/random` | —                                         |
-| GET | `/movies/popular` | `page`                                    |
-| GET | `/movies/now-playing` | `page`                                    |
-| GET | `/movies/upcoming` | `page` (ignorado pelo client, ver acima) |
-| GET | `/movies/top-rated` | `page`                                    |
+| Método | Endpoint | Parâmetros |
+|---|---|---|
+| GET | `/movies/search` | `query` (2–100 chars) |
+| GET | `/movies/{movieId}` | — |
+| GET | `/movies/{movieId}/trailer` | 204 se não houver trailer |
+| GET | `/movies/{movieId}/similar` | `page` (1–1000) |
+| GET | `/movies/{movieId}/recommendations` | `page` |
+| GET | `/movies/{movieId}/reviews` | `page` |
+| GET | `/movies/{movieId}/lists` | `page` |
+| GET | `/movies/trending/week` | — |
+| GET | `/movies/trending/random` | — |
+| GET | `/movies/popular` | `page` |
+| GET | `/movies/now-playing` | `page` |
+| GET | `/movies/upcoming` | `page` (ignorado pelo client, ver bug acima) |
+| GET | `/movies/top-rated` | `page` |
 
 ### Watchlist
 | Método | Endpoint |
 |---|---|
-| GET | `/watchlist?status=&page=&size=` |
-| GET | `/watchlist/{movieId}` |
-| PUT | `/watchlist/{movieId}` |
-| DELETE | `/watchlist/{movieId}` |
-| GET | `/users/{userId}/watchlist?status=&page=&size=` |
+| GET 🔒 | `/watchlist?status=&page=&size=` |
+| GET 🔒 | `/watchlist/{movieId}` |
+| PUT 🔒 | `/watchlist/{movieId}` |
+| DELETE 🔒 | `/watchlist/{movieId}` |
+| GET 🔒 | `/users/{userId}/watchlist?status=&page=&size=` |
 
 ### Amigos
 | Método | Endpoint |
 |---|---|
-| POST | `/friends/requests/{userId}` |
-| GET | `/friends/requests` |
-| POST | `/friends/requests/{requestId}/accept` |
-| POST | `/friends/requests/{requestId}/reject` |
-| GET | `/friends` |
-| GET | `/friends/count` |
-| GET | `/friends/status/{userId}` |
+| POST 🔒 | `/friends/requests/{userId}` |
+| GET 🔒 | `/friends/requests` |
+| POST 🔒 | `/friends/requests/{requestId}/accept` |
+| POST 🔒 | `/friends/requests/{requestId}/reject` |
+| GET 🔒 | `/friends` |
+| GET 🔒 | `/friends/count` |
+| GET 🔒 | `/friends/status/{userId}` |
 
 ### Compartilhamentos
 | Método | Endpoint |
 |---|---|
-| POST | `/shares` |
-| GET | `/shares/received` |
-| GET | `/shares/pending` |
-| GET | `/shares/sent` |
-| PATCH | `/shares/{shareId}/accept` |
-| PATCH | `/shares/{shareId}/reject` |
+| POST 🔒 | `/shares` |
+| GET 🔒 | `/shares/received` |
+| GET 🔒 | `/shares/pending` |
+| GET 🔒 | `/shares/sent` |
+| PATCH 🔒 | `/shares/{shareId}/accept` |
+| PATCH 🔒 | `/shares/{shareId}/reject` |
 
 ---
 
@@ -430,10 +549,10 @@ Prefixo comum: `/api/v1`. = requer `Authorization: Bearer <token>`.
 | `TmdbMovieNotFoundException` | 404 | |
 | `TmdbException` | 502 | Falha genérica ao chamar o TMDB. |
 | `IllegalArgumentException` | 400 | Usada de forma ampla em quase todos os services para regras de validação de negócio (não só argumentos inválidos). |
-| `IllegalStateException` | 409 | Usada tanto para "operação não permitida" (`AuthenticatedUser` sem contexto, `FriendService`/`ShareService` recusando ação de quem não é dono) quanto para "estado inválido" (solicitação já processada) ver ponto de atenção sobre status HTTP semanticamente incorreto para casos de autorização. |
+| `IllegalStateException` | 409 | Usada tanto para "operação não permitida" (`AuthenticatedUser` sem contexto, `FriendService`/`ShareService` recusando ação de quem não é dono) quanto para "estado inválido" (solicitação já processada) — status HTTP semanticamente incorreto para os casos de autorização (ver [Débito técnico](#débito-técnico-e-bugs-conhecidos)). |
 | `AccessDeniedException` | 403 | Handler presente, mas nenhuma parte do código lança essa exceção do Spring Security diretamente (não há `@PreAuthorize`). |
 | `ShareRecipientNotFoundException` | 404 | |
-| `WatchlistItemNotFoundException` | 404 | **Handler existe, mas a exceção nunca é lançada** "filme não encontrado na watchlist" hoje é sinalizado como `IllegalArgumentException` (400), não 404. |
+| `WatchlistItemNotFoundException` | 404 | **Handler existe, mas a exceção nunca é lançada** — "filme não encontrado na watchlist" hoje é sinalizado como `IllegalArgumentException` (400), não 404. |
 | `HttpMessageNotReadableException`, `MissingServletRequestParameterException`, `MethodArgumentTypeMismatchException` | 400 | JSON malformado, parâmetro obrigatório ausente, tipo incompatível. |
 | Qualquer outra `Exception` | 500 | Handler catch-all: loga a exceção completa no servidor, responde com mensagem genérica — nunca expõe stacktrace ao cliente. |
 
@@ -456,249 +575,61 @@ As mensagens de validação (`message = "..."`) são customizadas e em portuguê
 
 ---
 
-## Configurações de Segurança
-
-O WatchuSee implementa várias camadas de segurança para proteger tanto os dados dos usuários quanto a integração com serviços externos como o TMDB.
-
-### Mitigação de SSRF (Server-Side Request Forgery)
-
-A aplicação integra-se ao **The Movie Database (TMDB)**, um serviço externo que requer medidas rigorosas contra ataques SSRF. Para prevenir que requisições maliciosas acessem recursos internos da rede, o `RestClientConfig` implementa uma estratégia de **whitelist** estrita:
-
-#### 1. Whitelist de Hosts (`TmdbProperties`)
-
-```properties
-# Configuração em application.properties ou application.yml
-tmdb.baseUrl=https://api.themoviedb.org/3
-tmdb.apiKey=YOUR_API_KEY_HERE
-tmdb.language=pt-BR
-tmdb.allowedHosts=api.themoviedb.org
-```
-
-O `TmdbProperties` define:
-- `baseUrl`: URL base da API do TMDB (fixa e imutável)
-- `apiKey`: Chave de acesso ao TMDB
-- `language`: Idioma de resposta (padrão: `pt-BR`)
-- `allowedHosts`: Conjunto **obrigatório** de hosts permitidos para evitar SSRF
-- `maxRetries`: Número máximo de tentativas de requisição (com retry exponencial entre 0-60s)
-- `connectTimeout` e `readTimeout`: Tempos de espera da conexão HTTP
-
-#### 2. Validação de Host (`IpAllowlistConfig`)
-
-A classe `IpAllowlistConfig` valida **cada requisição** ao TMDB:
-
-```java
-public record IpAllowlistConfig(
-    Set<String> allowedHosts,
-    boolean logViolationAttempts
-) {
-    public boolean isAllowed(String host) {
-        return allowedHosts.contains(host.toLowerCase());
-    }
-
-    public static String extractHostFromUrl(String url) {
-        java.net.URI uri = new java.net.URI(url);
-        return uri.getHost() != null ? uri.getHost().toLowerCase() : "";
-    }
-}
-```
-
-- A extração do host é feita via `URI` e comparada case-insensitive com a whitelist.
-- Violações são registradas se `logViolationAttempts = true` (padrão).
-- Requer validação no startup: lança `IllegalStateException` se `allowedHosts` estiver vazio.
-
-#### 3. SSL Seguro (`CustomSSLContext`)
-
-Para evitar ataques **Man-in-the-Middle (MitM)**, o `CustomSSLContext` implementa:
-
-```java
-private static final Set<String> BLOCKED_HOSTPATTERNS = new HashSet<>(Set.of(
-    "localhost", "127.0.0.1", "::1"
-));
-
-private static class SecureTrustManager implements X509TrustManager {
-    @Override
-    public void checkServerTrusted(X509Certificate[] certs, String authType) throws CertificateException {
-        for (X509Certificate cert : certs) {
-            if (!isTrustedByPublicCA(cert)) {
-                throw new CertificateException("SSRF: Auto-signed certificate rejected!");
-            }
-        }
-    }
-}
-
-private static boolean isTrustedByPublicCA(X509Certificate cert) {
-    return cert != null &&
-           (cert.getIssuerDN() != null &&
-            !cert.getIssuerDN().equals(cert.getSubjectDN()));
-}
-```
-
-A lógica de segurança inclui:
-- **Rejeição de certificados autoassinados**: apenas certificados emitidos por autoridades certificadoras públicas (CAs) confiáveis são aceitos.
-- **Bloqueio de hosts internos**: `localhost`, `127.0.0.1`, `::1` são sempre bloqueados, prevenindo acesso a serviços locais maliciosos.
-
-### Senhas Hashadas (`PasswordEncoderConfig`)
-
-O `PasswordEncoderConfig` usa o `DelegatingPasswordEncoder` do Spring Security:
-
-```java
-@Bean
-public PasswordEncoder passwordEncoder() {
-    return PasswordEncoderFactories.createDelegatingPasswordEncoder();
-}
-```
-
-**Funcionamento:**
-- Suporta múltiplos algoritmos (BCrypt, SCrypt, PBKDF2), com migração automática.
-- Senhas são armazenadas apenas como hashes no banco de dados.
-- Não há reversibilidade: não é possível recuperar a senha original a partir do hash.
-
-### Restrições CORS (`CorsProperties`)
-
-O `CorsProperties` configura o CORS:
-
-```java
-@Bean
-public CorsProperties corsProperties() {
-    CorsProperties properties = new CorsProperties();
-    properties.setAllowedOrigins("https://watchusee.vercel.app", "http://localhost:3000");
-    properties.setAllowedMethods("", "GET", "POST", "PUT", "DELETE", "OPTIONS");
-    return properties;
-}
-```
-
-**Origens permitidas:**
-- Produção: `https://watchusee.vercel.app`
-- Desenvolvimento: `http://localhost:3000`
-
-Métodos e cabeçalhos são configurados para evitar ataques **Cross-Origin**. Em produção, recomenda-se restringir ainda mais.
-
-### Autenticação JWT (`JwtAuthenticationFilter`)
-
-A autenticação via JWT segue o padrão stateless:
-
-```java
-@PostConstruct
-public void validateTokenExpiration() {
-    LocalDateTime now = LocalDateTime.now();
-    Instant expirationInstant = now.atZone(ZoneId.of("UTC")).toInstant();
-    long validAfterMillis = jwtProperties.getValidAfter().toSeconds();
-    
-    if (expirationInstant != null) {
-        this.tokensValidAfter = expirationInstant.toEpochMilli() - validAfterMillis;
-    }
-}
-```
-
-**Fluxo:**
-1. O `JwtAuthenticationFilter` intercepta requisições protegidas e valida o token `Authorization: Bearer {token}`.
-2. Tokens emitidos antes de `tokensValidAfter` são inválidos, invalidando sessões antigas ao trocar senha.
-3. Nenhum mecanismo de blacklist explícito (lista de tokens revogados) é implementado hoje — apenas a expiração temporal controla o ciclo de vida do token.
-
-### Hashing de Senhas
-
-**Método:** Spring Security `DelegatingPasswordEncoder` com BCrypt como algoritmo padrão.
-- **Por que não PBKDF2?** O `DelegatingPasswordEncoder` migra automaticamente: ao trocar a senha, a nova hash é salgada e futura validação usa o novo algoritmo. Usar PBKDF2 manualmente exigiria migrar todas as senhas existentes, o que é complexoso.
-- **Fator de custo BCrypt:** Configurado pelo `spring.security.crypto.password.hasher.salt.source` (geralmente 10).
-- **Recomendação:** Para aplicações em alta escala, considere usar um algoritmo com maior fator de custo e PBKDF2 se a migração for viável.
-
-### Considerações sobre SSL/TLS no `RestClient`
-
-O `CustomSSLContext` é usado para criar um `JdkClientHttpRequestFactory` seguro:
-
-```java
-@Bean
-public RestClient tmdbRestClient(TmdbProperties tmdbProperties, IpAllowlistConfig ipAllowlistConfig) {
-    JdkClientHttpRequestFactory requestFactory = CustomSSLContext.createSecureRequestFactory();
-    return RestClient.builder()
-        .baseUrl(URI.create(tmdbProperties.baseUrl()))
-        .requestFactory(requestFactory)
-        .requestInterceptor(...)
-        .build();
-}
-```
-
-**Pontos de atenção:**
-- Em produção com TLS (HTTPS), **certificados autoassinados são sempre rejeitados** — apenas CAs confiáveis são aceitas.
-- Se o cliente estiver configurado para **não validar certificados** (`acceptInvalidCertificates = true`), o `CustomSSLContext` ainda aplica validação de CA, prevenindo MitM.
-- Em ambientes internos sem TLS, o SSL não afeta, mas recomenda-se usar HTTPS em produção.
-
-### Resumo das Configurações de Segurança
-
-| Componente | Propósito | Status |
-|---|---|---|
-| `CustomSSLContext` | Validação de certificados SSL/TLS contra MitM e SSRF | ✅ Implementado |
-| `IpAllowlistConfig` | Whitelist de hosts para evitar acesso a endpoints não autorizados ao TMDB | ✅ Implementado |
-| `PasswordEncoderConfig` | Hashing seguro de senhas com BCrypt/SCrypt | ✅ Implementado |
-| `TmdbProperties` | Configuração de conexão segura com timeouts e retry lógico | ⚠️ Parcial (retry sem circuit breaker) |
-| `CorsProperties` | Restrição de origens para prevenir ataques CORS | ⚠️ Configurado, mas pode ser mais restrito em produção |
-| `JwtAuthenticationFilter` | Autenticação stateless via JWT com invalidação de tokens | ✅ Implementado |
-
-### Melhores Práticas Recomendadas (Alta Prioridade)
-
-1. **Validação rigorosa de hosts**: Garantir que `tmdb.allowedHosts` seja preenchido corretamente e nunca vazio.
-2. **SSL/TLS em produção**: Habilitar TLS com certificados válidos de CAs confiáveis, evitando certificados autoassinados.
-3. **CORS restrito**: Em produção, limitar `allowedOrigins` apenas ao domínio exato da aplicação.
-4. **Hashing de senhas**: Considerar migrar para PBKDF2 com maior custo computacional se viável.
-5. **Auditoria de logs**: Habilitar `logViolationAttempts = true` em todos os ambientes para rastrear tentativas de violação de whitelist.
-6. **Timeout e retry**: Configurar timeouts adequados e implementar circuit breaker (ex: Resilience4j) para falhas no TMDB.
-
-### Referências
-
-- [OWASP SSRF](https://owasp.org/www-project-web-security-testing-guide/)
-- [Spring Security Best Practices](https://github.com/spring-projects/spring-security/wiki/Authentication-and-Authorization-with-Security-Filters)
-- [Spring Cloud Circuit Breaker](https://spring.io/projects/spring-cloud-circuitbreaker)
 ## Serviços (Services)
 
-| Service | Responsabilidade                                                                                                                | Depende de |
-|---|---------------------------------------------------------------------------------------------------------------------------------|---|
+| Service | Responsabilidade | Depende de |
+|---|---|---|
 | `AuthService` | Login: valida bloqueio de conta, credenciais (com mitigação de timing attack), incrementa/reseta contador de falhas, emite JWT. | `UserRepository`, `PasswordEncoder`, `JwtService` |
-| `UserService` | Cadastro, troca de senha (com invalidação de sessões), busca de usuários, avatar, filme favorito.                               | `UserRepository`, `PasswordEncoder`, `MovieRepository`, `MovieService` |
-| `UserProfileService` | Monta o DTO de perfil (contadores de watchlist e amigos), usado tanto para o perfil próprio quanto o público.                   | `UserRepository`, `WatchlistRepository`, `FriendshipRepository` |
-| `MovieService` | Toda consulta "ao vivo" ao TMDB, tradução de DTOs externos para domínio/DTOs de resposta.                                       | `TmdbClient`, `MovieMapper` |
-| `WatchlistService` | CRUD da watchlist, incluindo a criação lazy do `Movie` local.                                                                   | `WatchlistRepository`, `UserRepository`, `MovieRepository`, `MovieService` |
-| `FriendService` | Ciclo de vida de solicitações de amizade, listagem, contagem, status de relacionamento.                                         | `FriendshipRepository`, `UserRepository` |
-| `ShareService` | Ciclo de vida de compartilhamentos de filme.                                                                                    | `ShareRepository`, `UserRepository` |
+| `UserService` | Cadastro, troca de senha (com invalidação de sessões), busca de usuários, avatar, filme favorito. | `UserRepository`, `PasswordEncoder`, `MovieRepository`, `MovieService` |
+| `UserProfileService` | Monta o DTO de perfil (contadores de watchlist e amigos), usado tanto para o perfil próprio quanto o público. | `UserRepository`, `WatchlistRepository`, `FriendshipRepository` |
+| `MovieService` | Toda consulta "ao vivo" ao TMDB, tradução de DTOs externos para domínio/DTOs de resposta. | `TmdbClient`, `MovieMapper` |
+| `WatchlistService` | CRUD da watchlist, incluindo a criação lazy do `Movie` local. | `WatchlistRepository`, `UserRepository`, `MovieRepository`, `MovieService` |
+| `FriendService` | Ciclo de vida de solicitações de amizade, listagem, contagem, status de relacionamento. | `FriendshipRepository`, `UserRepository` |
+| `ShareService` | Ciclo de vida de compartilhamentos de filme. | `ShareRepository`, `UserRepository` |
 
 Todos os métodos que alteram estado são `@Transactional`; leituras usam `@Transactional(readOnly = true)`.
 
+---
+
 ## Repositories
 
-| Repository | Métodos customizados                                                                                                                                                                                                                                                                                      | Interpretação |
-|---|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---|
-| `UserRepository` | `findByNick`, `existsByNick`, `findTop20ByNickContainingIgnoreCaseOrderByNickAsc`                                                                                                                                                                                                                         | O último é uma query derivada composta: `LIKE %nick%` case-insensitive, ordenada, limitada a 20 (`Top20`). |
-| `MovieRepository` | Nenhum customizado, só o CRUD padrão do `JpaRepository`.                                                                                                                                                                                                                                                  |
-| `WatchlistRepository` | `findByUserIdAndMovieId`, `findAllByUserId`, `findAllByUserIdAndStatus` (todos com `@EntityGraph(attributePaths = "movie")` para evitar N+1 ao serializar o filme), `existsByUserIdAndMovieIdAndStatus`, `countByUserIdAndStatus`, `deleteByUserIdAndMovieId`.                                            |
-| `FriendshipRepository` | `findByRequesterIdAndReceiverId`, `existsByRequesterIdAndReceiverId`, `countByRequesterIdAndStatus`, `countByReceiverIdAndStatus`, `findByReceiverIdAndStatus`, `findByRequesterIdAndStatus`, `findByRequesterIdOrReceiverIdAndStatus`.                                                                   |
-| `ShareRepository` | `findByRecipientIdOrderByCreatedAtDesc`, `findBySenderIdOrderByCreatedAtDesc`, `findByRecipientIdAndStatusOrderByCreatedAtDesc`, `findByIdAndRecipientId`, `findByIdAndSenderId` (este último não é usado em nenhum service, ver pontos de atenção), `existsBySenderIdAndRecipientIdAndMovieIdAndStatus`. |
+| Repository | Métodos customizados | Interpretação |
+|---|---|---|
+| `UserRepository` | `findByNick`, `existsByNick`, `findTop20ByNickContainingIgnoreCaseOrderByNickAsc` | O último é uma query derivada composta: `LIKE %nick%` case-insensitive, ordenada, limitada a 20 (`Top20`). |
+| `MovieRepository` | Nenhum customizado, só o CRUD padrão do `JpaRepository`. | |
+| `WatchlistRepository` | `findByUserIdAndMovieId`, `findAllByUserId`, `findAllByUserIdAndStatus` (todos com `@EntityGraph(attributePaths = "movie")` para evitar N+1 ao serializar o filme), `existsByUserIdAndMovieIdAndStatus`, `countByUserIdAndStatus`, `deleteByUserIdAndMovieId`. | |
+| `FriendshipRepository` | `findByRequesterIdAndReceiverId`, `existsByRequesterIdAndReceiverId`, `countByRequesterIdAndStatus`, `countByReceiverIdAndStatus`, `findByReceiverIdAndStatus`, `findByRequesterIdAndStatus`, `findByRequesterIdOrReceiverIdAndStatus`. | |
+| `ShareRepository` | `findByRecipientIdOrderByCreatedAtDesc`, `findBySenderIdOrderByCreatedAtDesc`, `findByRecipientIdAndStatusOrderByCreatedAtDesc`, `findByIdAndRecipientId`, `findByIdAndSenderId` (não usado em nenhum service — ver [Débito técnico](#débito-técnico-e-bugs-conhecidos)), `existsBySenderIdAndRecipientIdAndMovieIdAndStatus`. | |
 
 ---
 
 ## Dependências (`pom.xml`)
 
-| Dependência | Finalidade                                                                      |
-|---|---------------------------------------------------------------------------------|
-| `spring-boot-starter-webmvc` | Roteamento REST (MVC).                                                          |
-| `spring-boot-starter-data-jpa` | Spring Data JPA / Hibernate.                                                    |
-| `spring-boot-starter-security` + `spring-security-crypto` | Autenticação/autorização e `PasswordEncoder`.                                   |
-| `spring-boot-starter-validation` | Bean Validation (Jakarta).                                                      |
-| `spring-boot-starter-actuator` | Endpoint `/actuator/health` (único exposto publicamente).                       |
-| `springdoc-openapi-starter-webmvc-ui` (3.0.2) | Geração de OpenAPI/Swagger UI.                                                  |
-| `postgresql` (runtime) | Driver JDBC do PostgreSQL.                                                      |
-| `io.jsonwebtoken:jjwt-api/jjwt-impl/jjwt-jackson` (0.12.6) | Geração e validação de JWT.                                                     |
-| `spring-boot-devtools` (runtime, optional) | Live reload em desenvolvimento.                                                 |
-| `com.squareup.okhttp3:mockwebserver` (teste) | Simulação de servidor HTTP                                                      |
-| `spring-boot-starter-*-test` (actuator, cache, validation, webmvc) | Suporte de teste correspondente a cada starter.                                 |
+| Dependência | Finalidade |
+|---|---|
+| `spring-boot-starter-webmvc` | Roteamento REST (MVC). |
+| `spring-boot-starter-data-jpa` | Spring Data JPA / Hibernate. |
+| `spring-boot-starter-security` + `spring-security-crypto` | Autenticação/autorização e `PasswordEncoder`. |
+| `spring-boot-starter-validation` | Bean Validation (Jakarta). |
+| `spring-boot-starter-actuator` | Endpoint `/actuator/health` (único exposto publicamente). |
+| `spring-boot-starter-cache` | Infraestrutura de cache do Spring (`@Cacheable`/`@CacheEvict`) — dependência presente, mas nenhum cache é usado hoje (ver [Melhorias futuras](#melhorias-futuras)). |
+| `springdoc-openapi-starter-webmvc-ui` (3.0.2) | Geração de OpenAPI/Swagger UI. |
+| `postgresql` (runtime) | Driver JDBC do PostgreSQL. |
+| `io.jsonwebtoken:jjwt-api/jjwt-impl/jjwt-jackson` (0.12.6) | Geração e validação de JWT. |
+| `spring-boot-devtools` (runtime, optional) | Live reload em desenvolvimento. |
+| `com.squareup.okhttp3:mockwebserver` (teste) | Simulação de servidor HTTP para testar `TmdbClientImpl`. |
+| `h2` (teste) | Banco em memória para testes com persistência real. |
+| `spring-boot-starter-*-test` (actuator, cache, validation, webmvc) | Suporte de teste correspondente a cada starter. |
 
 Dependências transitivas relevantes (não declaradas diretamente, mas trazidas pelos starters): **Hibernate ORM** (persistência), **HikariCP** (pool de conexões, padrão do Spring Boot), **Jackson** (serialização JSON).
 
-Parent: `spring-boot-starter-parent` `4.0.8`. Java `21`. Build: Maven (`spring-boot-maven-plugin`).
+Parent: `spring-boot-starter-parent` **4.1.1**. Java `21`. Build: Maven (`spring-boot-maven-plugin`).
 
 ---
 
 ## Configuração
 
-Arquivo único: `src/main/resources/application.properties` (sem perfis/`application-{profile}.properties` — não há separação dev/prod no código).
+Arquivo único: `src/main/resources/application.properties`
 
 ```properties
 spring.application.name=watchusee
@@ -706,6 +637,15 @@ spring.application.name=watchusee
 tmdb.base-url=https://api.themoviedb.org
 tmdb.api-key=${TMDB_API_KEY}
 tmdb.language=pt-BR
+
+tmdb.connect-timeout=${TMDB_CONNECT_TIMEOUT:3s}
+tmdb.read-timeout=${TMDB_READ_TIMEOUT:5s}
+
+tmdb.max-retries=${TMDB_MAX_RETRIES:3}
+tmdb.retry-initial-delay=${TMDB_RETRY_INITIAL_DELAY:500ms}
+tmdb.retry-max-delay=${TMDB_RETRY_MAX_DELAY:5s}
+
+tmdb.allowed-hosts=localhost,127.0.0.1,::1,api.themoviedb.org
 
 security.jwt.issuer=watchusee-api
 security.jwt.secret=${JWT_SECRET}
@@ -720,6 +660,9 @@ security.rate-limit.auth.window-seconds=60
 security.rate-limit.public-api.max-requests=60
 security.rate-limit.public-api.window-seconds=60
 
+security.rate-limit.friend-request.max-requests=${FRIEND_REQUEST_RATE_LIMIT_MAX:20}
+security.rate-limit.friend-request.window-seconds=${FRIEND_REQUEST_RATE_LIMIT_WINDOW_SECONDS:60}
+
 security.cors.allowed-origins=http://localhost:3000,http://localhost:5173
 
 spring.datasource.url=${SUPABASE_URL}
@@ -731,18 +674,31 @@ spring.jpa.hibernate.ddl-auto=update
 spring.jpa.open-in-view=false
 spring.jpa.properties.hibernate.default_schema=app
 spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+
+management.endpoints.web.exposure.include=health
+management.endpoint.health.show-details=never
+
+security.login.dummy-password-hash=${DUMMY_PASSWORD_HASH}
 ```
 
-## Variáveis de ambiente
+### Variáveis de ambiente
 
-| Variável | Obrigatória | Descrição                                                                                                                                  |
-|---|---|--------------------------------------------------------------------------------------------------------------------------------------------|
-| `TMDB_API_KEY` | Sim | Chave de API do TMDB.                                                                                                                      |
-| `SUPABASE_URL` | Sim | URL JDBC completa do PostgreSQL (`jdbc:postgresql://host:porta/database?...`).                                                             |
-| `SUPABASE_USERNAME` | Sim | Usuário do banco.                                                                                                                          |
-| `SUPABASE_PASSWORD` | Sim | Senha do banco.                                                                                                                            |
-| `JWT_SECRET` | Sim | Segredo de assinatura do JWT com no mínimo 32 caracteres (validado em `JwtService`, lança `IllegalArgumentException` no boot se for menor). |
-| `PORT` | Não | Usada apenas no `Dockerfile` (`--server.port=${PORT:-8080}`), não referenciada em `application.properties`.                                |
+| Variável | Obrigatória | Descrição |
+|---|---|---|
+| `TMDB_API_KEY` | Sim | Chave de API do TMDB. |
+| `SUPABASE_URL` | Sim | URL JDBC completa do PostgreSQL (`jdbc:postgresql://host:porta/database?...`). |
+| `SUPABASE_USERNAME` | Sim | Usuário do banco. |
+| `SUPABASE_PASSWORD` | Sim | Senha do banco. |
+| `JWT_SECRET` | Sim | Segredo de assinatura do JWT com no mínimo 32 caracteres (validado em `JwtService`, lança exceção no boot se for menor). |
+| `DUMMY_PASSWORD_HASH` | Sim | Hash BCrypt fixo usado para a mitigação de timing attack em login com nick inexistente. Sem valor default — **a aplicação não sobe sem essa variável**. |
+| `TMDB_CONNECT_TIMEOUT` | Não | Default `3s`. Declarada, mas não aplicada ao `RestClient` (ver [Débito técnico](#débito-técnico-e-bugs-conhecidos)). |
+| `TMDB_READ_TIMEOUT` | Não | Default `5s`. Mesma observação acima. |
+| `TMDB_MAX_RETRIES` | Não | Default `3`. Efetivamente usada pelo interceptor de retry do `RestClientConfig`. |
+| `TMDB_RETRY_INITIAL_DELAY` | Não | Default `500ms`. |
+| `TMDB_RETRY_MAX_DELAY` | Não | Default `5s`. |
+| `FRIEND_REQUEST_RATE_LIMIT_MAX` | Não | Default `20` req/janela. |
+| `FRIEND_REQUEST_RATE_LIMIT_WINDOW_SECONDS` | Não | Default `60`. |
+| `PORT` | Não | Usada apenas no `Dockerfile` (`--server.port=${PORT:-8080}`), não referenciada em `application.properties`. |
 
 Não existem outras variáveis de ambiente referenciadas no código além destas.
 
@@ -752,7 +708,7 @@ Não existem outras variáveis de ambiente referenciadas no código além destas
 
 ### Pré-requisitos
 - Java 21 (`java.version` no `pom.xml`).
-- Maven (o projeto inclui Maven Wrapper `3.9.16` — não é necessário ter Maven instalado globalmente).
+- Maven (o projeto inclui Maven Wrapper, não é necessário ter Maven instalado globalmente).
 - Uma instância PostgreSQL acessível (local ou Supabase).
 - Uma API key do TMDB.
 
@@ -767,6 +723,7 @@ export SUPABASE_URL="jdbc:postgresql://<host>:<porta>/<database>"
 export SUPABASE_USERNAME="seu_usuario"
 export SUPABASE_PASSWORD="sua_senha"
 export JWT_SECRET="sua_chave_jwt"
+export DUMMY_PASSWORD_HASH="hash_bcrypt_qualquer"
 
 ./mvnw spring-boot:run
 ```
@@ -786,10 +743,13 @@ docker run -p 8080:8080 \
   -e SUPABASE_USERNAME="seu_usuario" \
   -e SUPABASE_PASSWORD="sua_senha" \
   -e JWT_SECRET="sua_chave" \
+  -e DUMMY_PASSWORD_HASH="hash_bcrypt_qualquer" \
   watchusee-backend
 ```
 
-O `Dockerfile` é multi-stage: build com `maven:3.9-eclipse-temurin-21`, runtime com `eclipse-temurin:21-jre-alpine`, limite de heap `-Xmx800m`, porta configurável via `${PORT}`.
+> O `docker-compose.yml` do repositório ainda não repassa `DUMMY_PASSWORD_HASH` ao serviço `app`, sem ajustá-lo (ou sobrescrever via `docker-compose.override.yml`), `docker compose up` falha no boot.
+
+---
 
 ## Testes
 
@@ -799,151 +759,95 @@ O `Dockerfile` é multi-stage: build com `maven:3.9-eclipse-temurin-21`, runtime
 ./mvnw clean test
 ```
 
-### Estrutura de Testes
+### Estrutura de testes
 
-O projeto utiliza **JUnit 5** com extensões do Spring Boot e Mockito. A cobertura é feita com **Mockito**, enquanto testes reais usam **H2 Database**.
+O projeto usa **JUnit 5** com extensões do Spring Boot e Mockito, `AssertJ` para assertions e `MockWebServer` para simular o TMDB.
 
----
-
-#### **Unit Tests (Services)**
+#### Unit tests (services)
 
 Localização: `src/test/java/br/com/watchusee/watchusee/*/service/*Test.java`
 
-**Características:**
-- Isolados com Mockito para dependências (repositories, clients, mappers)
-- Testam regras de negócio e validações de domínio
-- Uso extensivo de `@Nested` para organização por métodos/fluxos
-- Asserts claras com `AssertJ`
+- Isolados com Mockito para dependências (repositories, clients, mappers).
+- Testam regras de negócio e validações de domínio.
+- Uso extensivo de `@Nested` para organização por método/fluxo.
 
-| Serviço | Arquivo | Categorias de Testes |
-|---------|---------|---------------------|
-| **AuthService** | `AuthServiceTest.java` | Login, Logout, Troca de Senha, Bloqueio de Conta, Validação de Credenciais |
-| **UserService** | `UserServiceTest.java` | CRUD de Usuários, Busca, Permissões |
-| **UserProfileService** | `UserProfileServiceTest.java` | Atualização de Avatar, Filme Favorito |
-| **WatchlistService** | `WatchlistServiceTest.java` | Adicionar/Remover Filmes, Paginação, Filtros por Status |
-| **FriendService** | `FriendServiceTest.java` | Enviar Solicitação, Aceitar/Recusar, Listagem de Amigos, Auto-solicitação bloqueada |
-| **ShareService** | `ShareServiceTest.java` | Compartilhar Filmes, Receber Compartilhamentos, Expiração |
-| **MovieService** | `MovieServiceTest.java` | Busca, Popular, Tendências, Validação de IDs, Tratamento de Nulls |
+| Serviço | Arquivo | Cobre |
+|---|---|---|
+| `AuthService` | `AuthServiceTest.java` | Login, logout, troca de senha, bloqueio de conta, validação de credenciais. |
+| `UserService` | `UserServiceTest.java` | Cadastro, busca, troca de senha. |
+| `UserProfileService` | `UserProfileServiceTest.java` | Avatar, filme favorito, contadores de perfil. |
+| `WatchlistService` | `WatchlistServiceTest.java` | Adicionar/remover filmes, paginação, filtros por status. |
+| `FriendService` | `FriendServiceTest.java` | Enviar solicitação, aceitar/recusar, listagem, auto-solicitação bloqueada. |
+| `ShareService` | `ShareServiceTest.java` | Compartilhar, aceitar/recusar, listagens. |
+| `MovieService` | `MovieServiceTest.java` | Busca, populares, tendências, tratamento de nulls. |
 
----
-
-#### **Security Tests (Token e Blacklist)**
+#### Testes de segurança (token e blacklist)
 
 Localização: `src/test/java/br/com/watchusee/watchusee/shared/security/*Test.java`
 
-| Serviço | Arquivo | Testes Principais |
-|---------|---------|-------------------|
-| **JwtService** | `JwtServiceTest.java` | Geração, Validação, Expiração, Assinatura |
-| **InMemoryTokenBlacklistService** | `InMemoryTokenBlacklistServiceTest.java` | Adicionar Revogação, Verificação de Blacklist, Tempo de Visto |
+| Componente | Arquivo | Cobre |
+|---|---|---|
+| `JwtService` | `JwtServiceTest.java` | Geração, validação, expiração, assinatura. |
+| `InMemoryTokenBlacklistService` | `InMemoryTokenBlacklistServiceTest.java` | Revogação, verificação de blacklist. |
 
----
+#### Testes de aplicação
 
-#### **Application Tests (Sistema Completo)**
+`WatchuseeApplicationTests.java` verifica apenas o boot do contexto Spring (`contextLoads`) — não é um teste de integração de fluxo completo.
 
-Localização: `src/test/java/br/com/watchusee/watchusee/WatchuseeApplicationTests.java`
+#### Lacunas atuais (não cobertas)
 
-**O que cobre:**
-- Boot da aplicação Spring Boot
-- Configuração básica de dependências
-- Verificação de portas e inicialização do servidor web
-
----
-
-####⃣ **Possíveis Testes de Integração (Futuro)**
-
-Para expansão, podem-se adicionar:
-
-- **Controller Tests:** Testar endpoints `/api/v1/*` com `WebMvcTest` + `MockMvc`
-- **Repository Tests:** Validar consultas JPA/Hibernate diretamente no banco (H2)
-- **Integration Tests:** Usar `@SpringBootTest` para testar fluxos completos
-- **Security Tests Integration:** Testar filtros de autenticação e autorização com contexto real
-- **Load/Performance Tests:** Usar `Gatling`, `JMeter` ou `Micrometer Observability`
-
----
-
-### Dependências de Teste (`pom.xml`)
-
-
-```xml
-<dependencies>
-    <!-- Spring Boot Starter Test (inclui JUnit 5, AssertJ, Mockito) -->
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-test</artifactId>
-        <scope>test</scope>
-    </dependency>
-
-    <!-- H2 Database para testes de unidade com persistência -->
-    <dependency>
-        <groupId>com.h2database</groupId>
-        <artifactId>h2</artifactId>
-        <scope>test</scope>
-    </dependency>
-
-    <!-- MockWebServer para simular TMDB em testes -->
-    <dependency>
-        <groupId>com.squareup.okhttp3</groupId>
-        <artifactId>mockwebserver</artifactId>
-        <version>4.12.0</version>
-        <scope>test</scope>
-    </dependency>
-
-    <!-- Starters de teste específicos -->
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-webmvc-test</artifactId>
-        <scope>test</scope>
-    </dependency>
-
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-validation-test</artifactId>
-        <scope>test</scope>
-    </dependency>
-
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-cache-test</artifactId>
-        <scope>test</scope>
-    </dependency>
-</dependencies>
-```
-
----
-
-### Melhores Práticas Atuais
-
-1. **Descrições claras com `@DisplayName`**: Todo teste tem uma descrição em português do que verifica.
-2. **Organização com `@Nested`**: Grupos de testes por fluxo/método para evitar repetição.
-3. **Mocking estratégico**: Apenas o necessário é mockado; persistência real ocorre quando relevante.
-4. **Assertions semânticas**: Usar `assertThat()` + `is()`, `isEmpty()`, `containsExactly()` etc.
-5. **Verificação de interações**: Usar `verify(mock)` para garantir que repositórios/mocks foram chamados como esperado.
+- **Controllers**: nenhum `@WebMvcTest`/`MockMvc`, a camada HTTP (serialização, status codes, headers) não tem teste dedicado.
+- **Repositories**: nenhum teste de query derivada contra H2/Postgres real.
+- **Integração ponta a ponta**: nenhum `@SpringBootTest` cobrindo um fluxo completo (ex.: cadastro → login → adicionar à watchlist).
+- **Filtros de segurança com contexto real**: `RateLimitingFilter`/`JwtAuthenticationFilter` só são testados indiretamente, via os services que dependem deles.
 
 ---
 
 ## Swagger / OpenAPI
 
-`OpenApiConfig` define título, versão (`v1`), descrição, contato, licença (MIT) e tags (`Movies`, `Watchlist`) para o `springdoc-openapi`. Acesse `/swagger-ui/index.html` (ou `/v3/api-docs` para o JSON bruto) com a aplicação rodando. Ambos os endpoints são públicos por padrão (`SecurityConfig` os inclui em `permitAll`).
+`OpenApiConfig` define título, versão (`v1`), descrição, contato, licença (MIT) e tags (`Movies`, `Watchlist`) para o `springdoc-openapi`. Acesse `/swagger-ui/index.html` (ou `/v3/api-docs` para o JSON bruto) com a aplicação rodando. Ambos os endpoints são públicos por padrão (`SecurityConfig` os inclui em `permitAll`), o README já sinaliza que isso deveria ser desabilitado em produção.
 
 ---
 
 ## Decisões arquiteturais
 
 - **Package-by-feature em vez de package-by-layer**: cada módulo de negócio carrega sua própria pilha completa (domain/repository/service/controller/dto), o que localiza mudanças mas também faz módulos se acoplarem diretamente uns aos outros via injeção direta de repository/service de outro pacote (ex.: `WatchlistService` conhece `MovieRepository` e `MovieService`; `UserProfileService` conhece `FriendshipRepository` e `WatchlistRepository`).
-- **JWT stateless sem papéis**: não há modelagem de `Role`/`Authority`, a única distinção de identidade é "autenticado" vs. "não autenticado", e autorização por dono do recurso é feita manualmente em cada service.
-- **Persistência lazy de `Movie`**: em vez de espelhar todo o catálogo do TMDB localmente, o filme só é gravado no banco quando referenciado pela primeira vez (watchlist ou favorito), reduz escrita, mas introduz o problema de dados desatualizados descrito acima.
+- **JWT stateless sem papéis**: não há modelagem de `Role`/`Authority`; a única distinção de identidade é "autenticado" vs. "não autenticado", e autorização por dono do recurso é feita manualmente em cada service.
+- **Persistência lazy de `Movie`**: em vez de espelhar todo o catálogo do TMDB localmente, o filme só é gravado no banco quando referenciado pela primeira vez (watchlist ou favorito) — reduz escrita, mas introduz o problema de dados desatualizados (título/pôster/nota ficam congelados no valor do momento em que o filme foi salvo).
 - **`ddl-auto=update`**: schema evolui junto com as entidades sem migrations explícitas, rápido para iterar, mas arriscado em produção com dados reais (qualquer coluna nova `NOT NULL` sem `DEFAULT` explícito pode falhar ao aplicar contra uma tabela populada).
+
+---
+
+## Débito técnico e bugs conhecidos
+
+Lista consolidada de tudo que vale corrigir antes de tratar o projeto como pronto para produção com carga real. Itens já mencionados nas seções acima estão repetidos aqui de forma resumida, para servir como checklist único.
+
+| # | Item | Onde | Impacto |
+|---|---|---|---|
+| 1 | `getUpcomingMovies` não envia `page` ao TMDB | `TmdbClientImpl` | Funcional: paginação de "próximos lançamentos" sempre retorna a página 1. |
+| 2 | `getMovieVideos` usa idioma fixo `"pt-BR"` em vez de `tmdbProperties.language()` | `TmdbClientImpl` | Inconsistência silenciosa se o idioma configurado mudar. |
+| 3 | `WatchlistItemNotFoundException` tem handler mas nunca é lançada | `WatchlistService` / `GlobalExceptionHandler` | Cliente recebe 400 em vez de 404 ao tentar operar um item inexistente na watchlist. |
+| 4 | `IllegalStateException` usada para casos de autorização (não é dono do recurso) | `FriendService`, `ShareService`, `AuthenticatedUser` | Retorna 409 (Conflict) onde semanticamente seria 403 (Forbidden). |
+| 5 | `findByIdAndSenderId` declarado em `ShareRepository` mas nunca chamado | `ShareRepository` | Código morto — candidato a remoção ou a uso real (ex.: cancelar um share enviado). |
+| 6 | `tmdb.connect-timeout` / `tmdb.read-timeout` declarados mas não aplicados ao `RestClient` | `TmdbProperties`, `RestClientConfig` | O client TMDB roda sem timeout superior explícito — uma resposta lenta do TMDB pode segurar a thread da requisição além do esperado. |
+| 7 | Classe `PageResponse` duplicada: `shared.api.dto.PageResponse` (com `from(Page<T>)`) e `watchlist.api.dto.PageResponse` (sem factory) | `shared/api/dto`, `watchlist/api/dto` | `WatchlistController`/`UserWatchlistController` constroem a resposta manualmente em vez de usar `.from(...)`; duplicação de manutenção. |
+| 8 | Inconsistência de pacote: controllers em `<módulo>/controller/` (`user`, `friend`, `share`) vs. `<módulo>/api/` (`movie`, `watchlist`) | Estrutura de pacotes | Não é bug funcional, mas quebra o padrão "package-by-feature" que o restante do código segue. |
+| 9 | `findOrCreateMovie` duplicado quase identicamente em `WatchlistService` e `UserService` | `WatchlistService`, `UserService` | Duplicação de lógica — candidato a extrair para um `MovieResolutionService` ou método utilitário compartilhado. |
+| 10 | `docker-compose.yml` não repassa `DUMMY_PASSWORD_HASH` ao serviço `app` | `docker-compose.yml` | `docker compose up` falha no boot da aplicação sem ajuste manual. |
+| 11 | Corrigido nesta revisão: `tmdb.allowed-hosts` tinha aspas literais no valor, quebrando a whitelist de SSRF; `security.cors.allowed-origins` tinha um link Markdown colado por engano, quebrando o CORS | `application.properties` | Ambos corrigidos — mantido aqui como registro histórico. |
 
 ---
 
 ## Melhorias futuras
 
 - Migrar gestão de schema para Flyway ou Liquibase.
-- Introduzir cache real (`@Cacheable`) para respostas do TMDB que mudam pouco (detalhes de filme, populares, top-rated).
+- Introduzir cache real (`@Cacheable`, já que `spring-boot-starter-cache` está no classpath) para respostas do TMDB que mudam pouco (detalhes de filme, populares, top-rated).
 - Substituir blacklist de token e rate limiting em memória por um armazenamento compartilhado (Redis) antes de rodar com múltiplas réplicas.
-- Adicionar testes de unidade para os services (especialmente regras de autorização em `FriendService`/`ShareService`) e testes de integração para os controllers.
-- Revisar o mapeamento de exceções para status HTTP (casos de autorização deveriam retornar 403, não 409).
+- Aplicar `tmdb.connect-timeout`/`tmdb.read-timeout` de fato no `RestClient` do TMDB.
+- Adicionar testes de controller (`@WebMvcTest`) e testes de integração ponta a ponta (`@SpringBootTest`).
+- Revisar o mapeamento de exceções de autorização para 403 em vez de 409.
 - Adicionar perfis de configuração (`dev`/`prod`) com Swagger desabilitado e CORS restrito em produção.
+- Resolver os itens de [Débito técnico](#débito-técnico-e-bugs-conhecidos) #5, #7, #8 e #9 (código morto, duplicação de classe/lógica, inconsistência de pacotes).
 
 ---
 
@@ -960,9 +864,10 @@ Para expansão, podem-se adicionar:
 [![Maven](https://img.shields.io/badge/Maven-C71A36?style=for-the-badge&logo=apachemaven)](https://maven.apache.org/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker)](https://www.docker.com/)
 [![JUnit 5](https://img.shields.io/badge/JUnit%205-25A162?style=for-the-badge&logo=junit5)](https://junit.org/junit5/)
+
 ---
 
-## AUTOR
+## Autor
 
 Desenvolvido por **Lucas Joly**.
 

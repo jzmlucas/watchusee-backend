@@ -7,6 +7,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
 import java.time.Duration;
+import java.util.Set;
 
 @Validated
 @ConfigurationProperties(prefix = "tmdb")
@@ -30,6 +31,8 @@ public record TmdbProperties(
 
         Duration retryInitialDelay,
 
-        Duration retryMaxDelay
+        Duration retryMaxDelay,
+
+        Set<String> allowedHosts
 ) {
 }
