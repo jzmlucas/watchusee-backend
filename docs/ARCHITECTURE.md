@@ -13,6 +13,7 @@
 * [API / Endpoints](#api--endpoints)
 * [Tratamento de erros](#tratamento-de-erros)
 * [Validações](#validações)
+* [Configurações de segurança](#configurações-de-segurança)
 * [Serviços (Services)](#serviços-services)
 * [Repositories](#repositories)
 * [Dependências (`pom.xml`)](#dependências-pomxml)
@@ -455,6 +456,198 @@ As mensagens de validação (`message = "..."`) são customizadas e em portuguê
 
 ---
 
+## Configurações de Segurança
+
+O WatchuSee implementa várias camadas de segurança para proteger tanto os dados dos usuários quanto a integração com serviços externos como o TMDB.
+
+### Mitigação de SSRF (Server-Side Request Forgery)
+
+A aplicação integra-se ao **The Movie Database (TMDB)**, um serviço externo que requer medidas rigorosas contra ataques SSRF. Para prevenir que requisições maliciosas acessem recursos internos da rede, o `RestClientConfig` implementa uma estratégia de **whitelist** estrita:
+
+#### 1. Whitelist de Hosts (`TmdbProperties`)
+
+```properties
+# Configuração em application.properties ou application.yml
+tmdb.baseUrl=https://api.themoviedb.org/3
+tmdb.apiKey=YOUR_API_KEY_HERE
+tmdb.language=pt-BR
+tmdb.allowedHosts=api.themoviedb.org
+```
+
+O `TmdbProperties` define:
+- `baseUrl`: URL base da API do TMDB (fixa e imutável)
+- `apiKey`: Chave de acesso ao TMDB
+- `language`: Idioma de resposta (padrão: `pt-BR`)
+- `allowedHosts`: Conjunto **obrigatório** de hosts permitidos para evitar SSRF
+- `maxRetries`: Número máximo de tentativas de requisição (com retry exponencial entre 0-60s)
+- `connectTimeout` e `readTimeout`: Tempos de espera da conexão HTTP
+
+#### 2. Validação de Host (`IpAllowlistConfig`)
+
+A classe `IpAllowlistConfig` valida **cada requisição** ao TMDB:
+
+```java
+public record IpAllowlistConfig(
+    Set<String> allowedHosts,
+    boolean logViolationAttempts
+) {
+    public boolean isAllowed(String host) {
+        return allowedHosts.contains(host.toLowerCase());
+    }
+
+    public static String extractHostFromUrl(String url) {
+        java.net.URI uri = new java.net.URI(url);
+        return uri.getHost() != null ? uri.getHost().toLowerCase() : "";
+    }
+}
+```
+
+- A extração do host é feita via `URI` e comparada case-insensitive com a whitelist.
+- Violações são registradas se `logViolationAttempts = true` (padrão).
+- Requer validação no startup: lança `IllegalStateException` se `allowedHosts` estiver vazio.
+
+#### 3. SSL Seguro (`CustomSSLContext`)
+
+Para evitar ataques **Man-in-the-Middle (MitM)**, o `CustomSSLContext` implementa:
+
+```java
+private static final Set<String> BLOCKED_HOSTPATTERNS = new HashSet<>(Set.of(
+    "localhost", "127.0.0.1", "::1"
+));
+
+private static class SecureTrustManager implements X509TrustManager {
+    @Override
+    public void checkServerTrusted(X509Certificate[] certs, String authType) throws CertificateException {
+        for (X509Certificate cert : certs) {
+            if (!isTrustedByPublicCA(cert)) {
+                throw new CertificateException("SSRF: Auto-signed certificate rejected!");
+            }
+        }
+    }
+}
+
+private static boolean isTrustedByPublicCA(X509Certificate cert) {
+    return cert != null &&
+           (cert.getIssuerDN() != null &&
+            !cert.getIssuerDN().equals(cert.getSubjectDN()));
+}
+```
+
+A lógica de segurança inclui:
+- **Rejeição de certificados autoassinados**: apenas certificados emitidos por autoridades certificadoras públicas (CAs) confiáveis são aceitos.
+- **Bloqueio de hosts internos**: `localhost`, `127.0.0.1`, `::1` são sempre bloqueados, prevenindo acesso a serviços locais maliciosos.
+
+### Senhas Hashadas (`PasswordEncoderConfig`)
+
+O `PasswordEncoderConfig` usa o `DelegatingPasswordEncoder` do Spring Security:
+
+```java
+@Bean
+public PasswordEncoder passwordEncoder() {
+    return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+}
+```
+
+**Funcionamento:**
+- Suporta múltiplos algoritmos (BCrypt, SCrypt, PBKDF2), com migração automática.
+- Senhas são armazenadas apenas como hashes no banco de dados.
+- Não há reversibilidade: não é possível recuperar a senha original a partir do hash.
+
+### Restrições CORS (`CorsProperties`)
+
+O `CorsProperties` configura o CORS:
+
+```java
+@Bean
+public CorsProperties corsProperties() {
+    CorsProperties properties = new CorsProperties();
+    properties.setAllowedOrigins("https://watchusee.vercel.app", "http://localhost:3000");
+    properties.setAllowedMethods("", "GET", "POST", "PUT", "DELETE", "OPTIONS");
+    return properties;
+}
+```
+
+**Origens permitidas:**
+- Produção: `https://watchusee.vercel.app`
+- Desenvolvimento: `http://localhost:3000`
+
+Métodos e cabeçalhos são configurados para evitar ataques **Cross-Origin**. Em produção, recomenda-se restringir ainda mais.
+
+### Autenticação JWT (`JwtAuthenticationFilter`)
+
+A autenticação via JWT segue o padrão stateless:
+
+```java
+@PostConstruct
+public void validateTokenExpiration() {
+    LocalDateTime now = LocalDateTime.now();
+    Instant expirationInstant = now.atZone(ZoneId.of("UTC")).toInstant();
+    long validAfterMillis = jwtProperties.getValidAfter().toSeconds();
+    
+    if (expirationInstant != null) {
+        this.tokensValidAfter = expirationInstant.toEpochMilli() - validAfterMillis;
+    }
+}
+```
+
+**Fluxo:**
+1. O `JwtAuthenticationFilter` intercepta requisições protegidas e valida o token `Authorization: Bearer {token}`.
+2. Tokens emitidos antes de `tokensValidAfter` são inválidos, invalidando sessões antigas ao trocar senha.
+3. Nenhum mecanismo de blacklist explícito (lista de tokens revogados) é implementado hoje — apenas a expiração temporal controla o ciclo de vida do token.
+
+### Hashing de Senhas
+
+**Método:** Spring Security `DelegatingPasswordEncoder` com BCrypt como algoritmo padrão.
+- **Por que não PBKDF2?** O `DelegatingPasswordEncoder` migra automaticamente: ao trocar a senha, a nova hash é salgada e futura validação usa o novo algoritmo. Usar PBKDF2 manualmente exigiria migrar todas as senhas existentes, o que é complexoso.
+- **Fator de custo BCrypt:** Configurado pelo `spring.security.crypto.password.hasher.salt.source` (geralmente 10).
+- **Recomendação:** Para aplicações em alta escala, considere usar um algoritmo com maior fator de custo e PBKDF2 se a migração for viável.
+
+### Considerações sobre SSL/TLS no `RestClient`
+
+O `CustomSSLContext` é usado para criar um `JdkClientHttpRequestFactory` seguro:
+
+```java
+@Bean
+public RestClient tmdbRestClient(TmdbProperties tmdbProperties, IpAllowlistConfig ipAllowlistConfig) {
+    JdkClientHttpRequestFactory requestFactory = CustomSSLContext.createSecureRequestFactory();
+    return RestClient.builder()
+        .baseUrl(URI.create(tmdbProperties.baseUrl()))
+        .requestFactory(requestFactory)
+        .requestInterceptor(...)
+        .build();
+}
+```
+
+**Pontos de atenção:**
+- Em produção com TLS (HTTPS), **certificados autoassinados são sempre rejeitados** — apenas CAs confiáveis são aceitas.
+- Se o cliente estiver configurado para **não validar certificados** (`acceptInvalidCertificates = true`), o `CustomSSLContext` ainda aplica validação de CA, prevenindo MitM.
+- Em ambientes internos sem TLS, o SSL não afeta, mas recomenda-se usar HTTPS em produção.
+
+### Resumo das Configurações de Segurança
+
+| Componente | Propósito | Status |
+|---|---|---|
+| `CustomSSLContext` | Validação de certificados SSL/TLS contra MitM e SSRF | ✅ Implementado |
+| `IpAllowlistConfig` | Whitelist de hosts para evitar acesso a endpoints não autorizados ao TMDB | ✅ Implementado |
+| `PasswordEncoderConfig` | Hashing seguro de senhas com BCrypt/SCrypt | ✅ Implementado |
+| `TmdbProperties` | Configuração de conexão segura com timeouts e retry lógico | ⚠️ Parcial (retry sem circuit breaker) |
+| `CorsProperties` | Restrição de origens para prevenir ataques CORS | ⚠️ Configurado, mas pode ser mais restrito em produção |
+| `JwtAuthenticationFilter` | Autenticação stateless via JWT com invalidação de tokens | ✅ Implementado |
+
+### Melhores Práticas Recomendadas (Alta Prioridade)
+
+1. **Validação rigorosa de hosts**: Garantir que `tmdb.allowedHosts` seja preenchido corretamente e nunca vazio.
+2. **SSL/TLS em produção**: Habilitar TLS com certificados válidos de CAs confiáveis, evitando certificados autoassinados.
+3. **CORS restrito**: Em produção, limitar `allowedOrigins` apenas ao domínio exato da aplicação.
+4. **Hashing de senhas**: Considerar migrar para PBKDF2 com maior custo computacional se viável.
+5. **Auditoria de logs**: Habilitar `logViolationAttempts = true` em todos os ambientes para rastrear tentativas de violação de whitelist.
+6. **Timeout e retry**: Configurar timeouts adequados e implementar circuit breaker (ex: Resilience4j) para falhas no TMDB.
+
+### Referências
+
+- [OWASP SSRF](https://owasp.org/www-project-web-security-testing-guide/)
+- [Spring Security Best Practices](https://github.com/spring-projects/spring-security/wiki/Authentication-and-Authorization-with-Security-Filters)
+- [Spring Cloud Circuit Breaker](https://spring.io/projects/spring-cloud-circuitbreaker)
 ## Serviços (Services)
 
 | Service | Responsabilidade                                                                                                                | Depende de |
