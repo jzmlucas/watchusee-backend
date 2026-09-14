@@ -47,13 +47,12 @@ public interface FriendshipRepository extends JpaRepository<Friendship, Long> {
     )
     Page<Friendship> findAcceptedFriendships(@Param("userId") Long userId, Pageable pageable);
 
-    @Query(
-            value = """
-                    SELECT COUNT(f) FROM Friendship f
-                    WHERE f.status = :status
-                      AND (f.userMinId = :userId OR f.userMaxId = :userId)
-                    """
-    )
+    @Query("""
+        SELECT COUNT(f)
+        FROM Friendship f
+        WHERE f.status = br.com.watchusee.watchusee.friend.domain.FriendshipStatus.ACCEPTED
+          AND (f.userMinId = :userId OR f.userMaxId = :userId)
+        """)
     long countAcceptedFriendships(@Param("userId") Long userId);
 
     @Query(
