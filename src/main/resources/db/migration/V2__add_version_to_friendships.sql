@@ -1,0 +1,1 @@
+ALTER TABLE app.friendships ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
