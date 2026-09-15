@@ -1,5 +1,7 @@
 # ==========================================
+
 # SEGREDOS, CREDENCIAIS E CONFIGURAÇÕES LOCAIS
+
 # ==========================================
 
 .env
@@ -8,11 +10,13 @@
 !.env.template
 
 # Configurações locais do Spring
+
 application-local.yml
 application-local.yaml
 application-local.properties
 
 # Chaves privadas e certificados
+
 *.pem
 *.key
 *.pkcs12
@@ -28,7 +32,9 @@ id_ed25519
 id_ed25519.*
 
 # ==========================================
+
 # CREDENCIAIS DE CLOUD
+
 # ==========================================
 
 .aws/
@@ -40,7 +46,9 @@ cloud-key.json
 credentials.json
 
 # ==========================================
+
 # BUILD / ARTEFATOS GERADOS
+
 # ==========================================
 
 target/
@@ -53,10 +61,13 @@ bin/
 *.class
 
 # Maven
+
 .mvn/timing.properties
 
 # ==========================================
+
 # LOGS / RUNTIME
+
 # ==========================================
 
 *.log
@@ -68,10 +79,13 @@ logs/
 log/
 
 # ==========================================
+
 # IDEs
+
 # ==========================================
 
 # IntelliJ IDEA
+
 .idea/
 *.iml
 *.iws
@@ -79,6 +93,7 @@ log/
 out/
 
 # Eclipse / STS
+
 .classpath
 .project
 .settings/
@@ -88,9 +103,11 @@ out/
 .sts4-cache/
 
 # VS Code
+
 .vscode/
 
 # NetBeans
+
 .nb-gradle/
 nbproject/private/
 nbbuild/
@@ -98,7 +115,9 @@ dist/
 nbdist/
 
 # ==========================================
+
 # SISTEMA OPERACIONAL
+
 # ==========================================
 
 .DS_Store
@@ -114,7 +133,9 @@ ehthumbs.db
 desktop.ini
 
 # ==========================================
+
 # BANCO DE DADOS LOCAL / DUMPS
+
 # ==========================================
 
 *.db
@@ -122,21 +143,34 @@ desktop.ini
 *.sqlite3
 
 *.dump
-*.sql
 *.sqldump
 
 *.sql.bak
 *.sql.tmp
 
+# Dumps SQL genéricos
+
+*.sql
+
+# Migrations do Flyway DEVEM ser versionadas
+
+!src/main/resources/db/
+!src/main/resources/db/migration/
+!src/main/resources/db/migration/*.sql
+
 # ==========================================
+
 # DOCKER / AMBIENTE LOCAL
+
 # ==========================================
 
 docker-compose.local.yml
 docker-compose.dev.local.yml
 
 # ==========================================
+
 # TESTES / COBERTURA
+
 # ==========================================
 
 coverage/
@@ -144,7 +178,9 @@ jacoco/
 *.exec
 
 # ==========================================
+
 # TEMPORÁRIOS
+
 # ==========================================
 
 *.tmp

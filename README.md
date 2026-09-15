@@ -132,7 +132,7 @@ O TMDB é a única fonte externa de dados de filmes. A aplicação tem um `TmdbC
 - PostgreSQL/Supabase
 - API Key do TMDB
 
-### Configuração
+## Configuração
 
 Defina as variáveis de ambiente utilizadas pela aplicação:
 
@@ -145,12 +145,22 @@ export JWT_SECRET="sua_chave_jwt_com_pelo_menos_32_caracteres"
 export DUMMY_PASSWORD_HASH="hash_bcrypt_qualquer"
 ```
 
-`DUMMY_PASSWORD_HASH` é obrigatória: é um hash BCrypt fixo usado para igualar o tempo de resposta do login quando o nick não existe (mitigação de enumeração de usuários). **Sem ela, a aplicação não sobe.** A lista completa de variáveis, com as opcionais e seus defaults, está em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#variáveis-de-ambiente).
+> **Flyway** é utilizado para versionamento de SQL, garantindo migrações seguras e reversíveis. As migrações estão localizadas em `src/main/resources/db/migration/`.  
+
+>`DUMMY_PASSWORD_HASH` é obrigatória: é um hash BCrypt fixo usado para igualar o tempo de resposta do login quando o nick não existe (mitigação de enumeração de usuários). **Sem ela, a aplicação não sobe.** A lista completa de variáveis, com as opcionais e seus defaults, está em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#variáveis-de-ambiente).
+
+## Testes
+
+```bash
+./mvnw clean test
+```
 
 Depois:
 
 ```bash
 ./mvnw spring-boot:run
+
+> **H2** é utilizado como banco de dados em memória para testes, permitindo execução de testes sem dependência de PostgreSQL. Configure-o com `spring.datasource.url=jdbc:h2:mem:testdb` no arquivo de configuração de testes.
 ```
 
 ### Docker
@@ -169,18 +179,11 @@ docker run -p 8080:8080 \
 
 > O `docker-compose.yml` do repositório ainda não repassa `DUMMY_PASSWORD_HASH` ao serviço `app` — adicione-a manualmente (ex. via `docker-compose.override.yml`) antes de rodar `docker compose up`, ou o container sobe e cai imediatamente no boot.
 
-## Testes
-
-```bash
-./mvnw clean test
-```
-
 Cobertura atual: unit tests de todos os services (Mockito + AssertJ) e testes dedicados de `JwtService`/blacklist de token. Não há ainda testes de controller (`@WebMvcTest`) nem de integração ponta a ponta — detalhes em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#testes).
 
 ## Notas de segurança
 
 - A documentação OpenAPI está disponível publicamente em `/swagger-ui/index.html` e `/v3/api-docs`, desabilite em produção se isso não for desejado.
-- `ddl-auto=update` aplica alterações de schema automaticamente a cada boot; não é recomendado para produção com dados reais sem uma estratégia de migração (Flyway/Liquibase).
 - Autorização de recurso (dono vs. terceiros) é feita manualmente em cada service, não via `@PreAuthorize`, ver [Autorização](docs/ARCHITECTURE.md#autorização--como-o-sistema-impede-acesso-a-dados-de-outros-usuários) no documento técnico.
 - Rate limiting e blacklist de token são em memória, por instância — não sobrevivem a reinício e não são compartilhados entre réplicas.
 
